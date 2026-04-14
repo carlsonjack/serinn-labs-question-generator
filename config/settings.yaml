@@ -1,0 +1,27 @@
+openai_api_key: ""
+model: "gpt-5.4"
+category_id: ""
+templates_directory: "templates"
+date_filter:
+  start: "2026-05-15"
+  end: "2026-06-01"
+date_rules:
+  default:
+    start_offset_hours: -24
+    expiration_offset_hours: 0
+    resolution_offset_hours: 4
+  mlb:
+    start_offset_hours: -24
+    expiration_offset_hours: 0
+    resolution_offset_hours: 4
+batch_size: 100
+inputs:
+  directory: "inputs"
+  files:
+    mlb:
+      event_source: "schedule.xlsx"
+      metric_source: "stats.xlsx"
+parsing:
+  persist_profiles: true
+  auto_detect_headers: true
+  min_confidence: 0.5
