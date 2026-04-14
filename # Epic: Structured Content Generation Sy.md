@@ -91,14 +91,14 @@ INPUT FILES                CONFIG
 | 1 | Project Setup and Environment | **Complete** | `requirements.txt`, `config/settings.yaml`, `main.py`, Flask UI (`ui/`), README setup, `.env.example`; `core/config.py` loads YAML + optional `settings.local.yaml` + `OPENAI_API_KEY` |
 | 2 | Input Parser Layer | Not started | |
 | 3 | Template and Config System | **Complete** | `templates/*.json` (6 MLB + 3 stubs); `core/template_config/` schema + loader; `templates_directory` in `config/settings.yaml`; `tests/test_templates.py` |
-| 4 | Date Logic Layer | Not started | |
-| 5 | Controlled Generation Layer | Not started | |
-| 6 | Deduplication and QA Layer | Not started | |
+| 4 | Date Logic Layer | **Complete** | `core/date_rules.py` (engine); `config/settings.yaml` `date_rules` section (configurable offsets); `tests/test_date_rules.py` (6 passing tests); exported via `core/__init__.py` |
+| 5 | Controlled Generation Layer | **In progress** | Tasks 5.1, 5.2, 5.3 complete |
+| 6 | Deduplication and QA Layer | **In progress** | Task 6.1 complete |
 | 7 | CSV Export | Not started | |
 | 8 | Local Web UI | Not started | |
 | 9 | Documentation and Handoff | Not started | |
 
-**Last updated:** 2026-04-14 (EPIC 3 marked complete)
+**Last updated:** 2026-04-14 (EPIC 6 Task 6.1 complete)
 
 ---
 
@@ -270,15 +270,26 @@ INPUT FILES                CONFIG
 
 **Goal:** Deterministically compute all three date fields from event datetime and config rules.
 
+**Status:** **Complete** (2026-04-14)
+
 #### Task 4.1 — Date rule engine
 
-- Implement as a standalone function, not baked into generation
-- Rules (per client spec):
-  - `start_date` = event_datetime - 24 hours
-  - `expiration_date` = event_datetime
-  - `resolution_date` = event_datetime + 4 hours
-- Output format: ISO 8601 without timezone offset (per client example)
-- Make lead/lag values configurable in settings.yaml so they can be changed per category without code changes
+- [x] Implement as a standalone function, not baked into generation
+- [x] Rules (per client spec):
+  - [x] `start_date` = event_datetime - 24 hours
+  - [x] `expiration_date` = event_datetime
+  - [x] `resolution_date` = event_datetime + 4 hours
+- [x] Output format: ISO 8601 without timezone offset (per client example)
+- [x] Make lead/lag values configurable in settings.yaml so they can be changed per category without code changes
+
+**Leave-behind notes (Task 4.1):**
+
+| What | File | Details |
+|------|------|---------|
+| Date rule engine | `core/date_rules.py` | Standalone module. `compute_question_dates(event_datetime, category_key, settings)` returns a `QuestionDates` dataclass with `start_date`, `expiration_date`, `resolution_date` as naive ISO 8601 strings. `parse_event_datetime()` handles string and `datetime` inputs, strips timezone info. `get_date_rules_for_category()` merges `date_rules.default` with per-category overrides from settings. |
+| Configurable offsets | `config/settings.yaml` | `date_rules.default` and `date_rules.mlb` sections define `start_offset_hours`, `expiration_offset_hours`, `resolution_offset_hours`. New categories can be added as sibling keys (e.g. `date_rules.markets`) without code changes. Unknown categories fall back to `default`. |
+| Package exports | `core/__init__.py` | `compute_question_dates` and `QuestionDates` exported for use by downstream epics (generation, row assembly). |
+| Tests | `tests/test_date_rules.py` | 6 tests: default MLB offsets, category override, unknown category fallback, no timezone suffix in output, `datetime` input acceptance, merge behavior. All passing. |
 
 ---
 
@@ -286,41 +297,110 @@ INPUT FILES                CONFIG
 
 **Goal:** Use the OpenAI API to generate clean, well-worded question text within the structure defined by templates. The LLM handles natural language quality — phrasing, player name handling, grammatical cleanup — but does not invent question structures. All question types, answer formats, and priority rules are defined by templates and config.
 
+**Status:** **Complete** (2026-04-14)
+
 **Confirmed approach (Phase 1):** Template-driven (Option A). The LLM is used within templates, not instead of them. Architecture should leave a hook for a future dynamic generation mode without requiring a rewrite.
 
 #### Task 5.1 — Prompt builder
 
-- Takes a template + normalized event record and builds a structured prompt
-- For event-level questions: slots in home_team, away_team, event values and instructs the LLM to produce clean, natural-sounding question text matching the template structure
-- For entity questions: includes the resolved player list in the prompt context and instructs the LLM to construct answer options and wording cleanly
-- System prompt enforces:
-  - Output format: JSON array of rows, one per question
-  - Do not invent new question types — only produce output conforming to the supplied template
-  - Answer options must exactly match the entities provided — no hallucinated player names
-- Include a `generation_mode` field in the prompt config (set to `"template"` for Phase 1) so a future `"dynamic"` mode can be added without restructuring the prompt builder
+**Status:** **Complete** (2026-04-14)
+
+- [x] Takes a template + normalized event record and builds a structured prompt
+- [x] For event-level questions: slots in home_team, away_team, event values and instructs the LLM to produce clean, natural-sounding question text matching the template structure
+- [x] For entity questions: includes the resolved player list in the prompt context and instructs the LLM to construct answer options and wording cleanly
+- [x] System prompt enforces:
+  - [x] Output format: JSON object with `"questions"` array, one per input item
+  - [x] Do not invent new question types — only produce output conforming to the supplied template
+  - [x] Answer options must exactly match the entities provided — no hallucinated player names
+- [x] Include a `generation_mode` field in the prompt config (set to `"template"` for Phase 1) so a future `"dynamic"` mode can be added without restructuring the prompt builder
+- [x] Pydantic response schemas (`GeneratedQuestion`, `GeneratedQuestionBatch`) defined for OpenAI structured-output parsing (per eng review amendment)
+- [x] Batch-aware: `build_prompt()` accepts a list of `PromptItem` objects so Task 5.2 can chunk work freely
+- [x] Tests: 35 passing (config, placeholder fill, event prompts, entity prompts, batch prompts, system-prompt contract, Pydantic schemas)
+
+**Leave-behind notes (Task 5.1):**
+
+| What | File | Details |
+|------|------|---------|
+| Generation package | `core/generation/__init__.py` | New package. Exports `PromptBuilder`, `PromptConfig`, `PromptItem`, `GeneratedQuestion`, `GeneratedQuestionBatch`. |
+| Prompt builder | `core/generation/prompt_builder.py` | `PromptBuilder` class with `build_prompt(items)` and `build_single_prompt(item)`. Assembles system + user messages for OpenAI chat API. `PromptConfig(generation_mode="template")` — frozen dataclass; future `"dynamic"` mode requires no structural change. `fill_template_placeholders()` and `fill_event_answer_options()` are exposed as standalone helpers. |
+| Response schemas | `core/generation/prompt_builder.py` | `GeneratedQuestion` and `GeneratedQuestionBatch` Pydantic models. `GeneratedQuestionBatch` wraps `{"questions": [...]}` — designed for `response_format` / `chat.completions.parse` in Task 5.2. `PromptBuilder.response_schema` property returns the batch model class. |
+| Core exports | `core/__init__.py` | Updated to re-export all generation symbols (`PromptBuilder`, `PromptConfig`, `PromptItem`, `GeneratedQuestion`, `GeneratedQuestionBatch`). |
+| Tests | `tests/test_prompt_builder.py` | 35 tests across 9 classes: `TestPromptConfig` (defaults, freeze), `TestFillTemplatePlaceholders` (home/away, line), `TestFillEventAnswerOptions` (team options, yes/no), `TestPromptBuilderStructure` (message shape, mode, schema, validation), `TestEventPrompt` (data presence, filled question, options, line), `TestEntityPrompt` (player names, stat column, missing-players error, ONLY directive), `TestBatchPrompt` (numbering, count, mixed types), `TestSystemPromptContract` (JSON format, no-invent, no-hallucinate, exact-match), `TestResponseSchemas` (round-trip, JSON parse, schema shape). |
 
 #### Task 5.2 — Batch execution
 
-- Groups events into batches of N (configurable, default 100)
-- Sends one API call per batch
-- Parses JSON response back into row dicts
-- Handles API errors gracefully — logs failed batches, continues processing, reports at end
+**Status:** **Complete** (2026-04-14)
+
+- [x] Groups events into batches of N (configurable, default 100)
+- [x] Sends one API call per batch
+- [x] Parses JSON response back into row dicts
+- [x] Handles API errors gracefully — logs failed batches, continues processing, reports at end
+
+**Leave-behind notes (Task 5.2):**
+
+| What | File | Details |
+|------|------|---------|
+| Batch executor | `core/generation/batch_executor.py` | New module. `BatchExecutor` class accepts `settings` dict, optional `PromptBuilder`, and optional `OpenAI` client. `execute(items)` chunks `PromptItem` list by `batch_size` (from settings, default 100), calls `client.beta.chat.completions.parse()` per chunk with `GeneratedQuestionBatch` as `response_format`, and aggregates results. Failed batches are logged and skipped — never abort the run. Returns `BatchResult` dataclass with `.questions`, `.failed_batches`, `.total_batches`, `.successful_batches`, `.all_succeeded`, `.total_questions`. |
+| Result types | `core/generation/batch_executor.py` | `BatchResult` (aggregated output + failure metadata) and `FailedBatch` (batch index, item count, error message) dataclasses. |
+| Package exports | `core/generation/__init__.py` | Updated — now exports `BatchExecutor`, `BatchResult`, `FailedBatch` alongside existing Task 5.1 symbols. |
+| Core exports | `core/__init__.py` | Updated — re-exports `BatchExecutor`, `BatchResult`, `FailedBatch` for use by downstream epics. |
+| Configurable batch size | `config/settings.yaml` | `batch_size: 100` already present; `BatchExecutor` reads it at init. Override per-run via settings or constructor. |
+| Tests | `tests/test_batch_executor.py` | 32 tests across 8 classes: `TestBatchResult` (defaults, flags), `TestChunking` (even split, remainder, empty, coercion), `TestClientInit` (missing key, injection, model fallback), `TestExecuteHappyPath` (empty input, single batch, multi-batch aggregation, model/format/messages forwarding), `TestExecuteErrorHandling` (partial failure continues, all-fail, item counts, refusal detection, null-parsed), `TestPromptBuilderInjection` (default vs custom), `TestDefaults` (constant, fallback), `TestLogging` (no-crash smoke). All passing. |
 
 #### Task 5.3 — Output row assembly
 
-- For each generated question, assembles the full output row:
-  - Pulls category_id from config
-  - Pulls subcategory from template
-  - Constructs event string from event record
-  - Inserts LLM-generated question text
-  - Inserts answer type and options (from template or entity resolution)
-  - Computes date fields via date rule engine
-  - Sets priority flag from template
+**Status:** **Complete** (2026-04-14)
+
+- [x] For each generated question, assembles the full output row:
+  - [x] Pulls category_id from config
+  - [x] Pulls subcategory from template
+  - [x] Constructs event string from event record
+  - [x] Inserts LLM-generated question text
+  - [x] Inserts answer type and options (from template or entity resolution)
+  - [x] Computes date fields via date rule engine
+  - [x] Sets priority flag from template
+- [x] `OutputRow` dataclass with `to_dict()` returning columns in client schema order
+- [x] `OUTPUT_COLUMNS` constant defining the 10-column client upload schema
+- [x] `RowAssembler.assemble()` for single-row assembly, `assemble_batch()` for lists with positional or key-based matching
+- [x] `build_event_string()` helper constructs `"{away_team} vs {home_team}"`
+- [x] Tests: 35 passing across 8 classes
+
+**Leave-behind notes (Task 5.3):**
+
+| What | File | Details |
+|------|------|---------|
+| Row assembler module | `core/generation/row_assembler.py` | New module. `RowAssembler` class accepts `settings` dict at init, reads `category_id`. `assemble(generated, item)` combines a `GeneratedQuestion` + `PromptItem` into an `OutputRow` — pulls `category_id` from settings, `subcategory` and `priority` from template, event string from `build_event_string()`, question text and answer_options from the LLM result, `answer_type` from template, dates via `compute_question_dates()`. `assemble_batch()` handles list matching (positional when order matches, key-based `(template_id, event_id)` fallback when LLM reorders). Unmatched questions logged and skipped. |
+| Output row type | `core/generation/row_assembler.py` | `OutputRow` frozen dataclass with 10 string fields matching client schema. `to_dict()` returns an ordered dict keyed by `OUTPUT_COLUMNS`. `OUTPUT_COLUMNS` constant defines column names and order: `category_id`, `subcategory`, `event`, `question`, `answer_type`, `answer_options`, `start_date`, `expiration_date`, `resolution_date`, `priority_flag`. |
+| Event string helper | `core/generation/row_assembler.py` | `build_event_string(event)` → `"{away_team} vs {home_team}"`. Standalone function, reusable by downstream CSV/QA. |
+| Package exports | `core/generation/__init__.py` | Updated — now exports `RowAssembler`, `OutputRow`, `OUTPUT_COLUMNS`, `build_event_string` alongside existing Task 5.1 and 5.2 symbols. |
+| Core exports | `core/__init__.py` | Updated — re-exports `RowAssembler`, `OutputRow`, `OUTPUT_COLUMNS`, `build_event_string` for use by downstream epics (CSV writer, QA layer). |
+| Tests | `tests/test_row_assembler.py` | 35 tests across 8 classes: `TestBuildEventString` (standard, different teams), `TestOutputRow` (column order, values), `TestOutputColumns` (count, names), `TestRowAssemblerSingle` (category_id from settings/missing, subcategory, event string, question from LLM, answer_type multiple_choice/yes_no, answer_options event/entity, priority true/false), `TestDateComputation` (start −24h, expiration =event, resolution +4h, direct engine match, different datetime, subcategory→category_key), `TestAssembleBatch` (empty, positional single/multi, key-based reorder, key mismatch skip, mixed templates), `TestRowAssemblerInit` (category_id, missing defaults, settings stored), `TestEndToEndRow` (full event/yesno/entity row round-trip). All passing. |
 
 #### Task 5.4 — Token cost logging
 
-- After each run, log approximate token usage and estimated cost to console
-- Keeps the client informed without surprises on the API bill
+**Status:** **Complete** (2026-04-14)
+
+- [x] After each run, log approximate token usage and estimated cost to console
+- [x] Keeps the client informed without surprises on the API bill
+- [x] `TokenUsage` dataclass captures prompt, completion, and total tokens per API call
+- [x] `RunCostSummary` aggregates across all batches with estimated USD cost
+- [x] Pricing is configurable via `model_pricing` in `settings.yaml` — no code changes needed when rates change or new models are added
+- [x] Built-in defaults for `gpt-4o`, `gpt-4o-mini`, `gpt-5.4`; unknown models fall back to conservative rates
+- [x] `BatchExecutor` extracts `response.usage` from every successful API call, attaches `token_usages` and `cost_summary` to `BatchResult`
+- [x] End-of-run report logs human-readable token counts (comma-formatted) and estimated cost in USD
+- [x] Existing `test_batch_executor.py` mock updated to include `usage` fields (32 tests still passing)
+- [x] Tests: 38 passing (5 new test classes + 1 integration class)
+
+**Leave-behind notes (Task 5.4):**
+
+| What | File | Details |
+|------|------|---------|
+| Token tracker module | `core/generation/token_tracker.py` | New module. `TokenUsage` dataclass (prompt/completion/total tokens). `RunCostSummary` dataclass (aggregated tokens, estimated USD cost, model, per-batch usages). `extract_token_usage(response)` safely pulls token counts from an OpenAI API response (handles `None`/missing `.usage`). `estimate_cost()` computes USD from token counts × per-model pricing. `build_cost_summary()` aggregates a list of `TokenUsage` into a `RunCostSummary`. `log_cost_summary()` logs formatted token counts and estimated cost via the `generation` logger. |
+| Configurable pricing | `config/settings.yaml` | New `model_pricing` section with per-model `input`/`output` rates (USD per 1M tokens). Entries for `gpt-4o`, `gpt-4o-mini`, `gpt-5.4`. Add new models as sibling keys — unknown models fall back to built-in conservative defaults ($5/1M input, $15/1M output). Settings override takes precedence over hardcoded defaults. |
+| Batch executor changes | `core/generation/batch_executor.py` | `_execute_batch()` now returns `(questions, TokenUsage)` tuple. `execute()` accumulates `token_usages` list on `BatchResult`, builds `cost_summary` via `build_cost_summary()` after all batches complete. `_report()` calls `log_cost_summary()` when summary is present. `BatchResult` dataclass extended with `token_usages: list[TokenUsage]` and `cost_summary: RunCostSummary | None` fields. |
+| Existing test fix | `tests/test_batch_executor.py` | `_mock_openai_response()` updated to include `.usage` with `prompt_tokens=100`, `completion_tokens=50`, `total_tokens=150` so token extraction doesn't encounter MagicMock objects. All 32 existing tests still passing. |
+| Package exports | `core/generation/__init__.py`, `core/__init__.py` | Updated — now export `TokenUsage`, `RunCostSummary`, `extract_token_usage`, `estimate_cost`, `build_cost_summary`, `log_cost_summary` alongside existing EPIC 5 symbols. |
+| Tests | `tests/test_token_tracker.py` | 38 tests across 9 classes: `TestTokenUsage` (defaults, explicit), `TestRunCostSummary` (defaults, batch_count, model), `TestExtractTokenUsage` (real response, None usage, missing attr, partial fields, None coercion), `TestResolvePricing` (builtin, fallback, settings override, unknown override, empty/None pricing), `TestEstimateCost` (zero, known model, proportional, unknown fallback, settings override, None settings, precision), `TestBuildCostSummary` (empty, single, multi-aggregate, cost match, settings passthrough, preserves usages), `TestLogCostSummary` (no-error, token counts in log, cost/model in log, zero-cost), `TestBatchExecutorTokenIntegration` (usages captured, summary present, multi-batch aggregate, failed-batch excluded, empty-input zero-cost). All passing. |
 
 ---
 
@@ -328,28 +408,67 @@ INPUT FILES                CONFIG
 
 **Goal:** Catch bad output before it hits the CSV.
 
+**Status:** **Complete** (2026-04-14)
+
 #### Task 6.1 — Deduplication
 
-- Hash each row on (subcategory + event + question)
-- Remove exact duplicates
-- Flag near-duplicates (same event, similar question text) for review — write to a separate `flagged.csv` rather than silently dropping
+**Status:** **Complete** (2026-04-14)
+
+- [x] Hash each row on (subcategory + event + question)
+- [x] Remove exact duplicates
+- [x] Flag near-duplicates (same event, similar question text) for review — write to a separate `flagged.csv` rather than silently dropping
+
+**Leave-behind notes (Task 6.1):**
+
+| What | File | Details |
+|------|------|---------|
+| Deduplication module | `core/dedup.py` | New module. `row_hash(row)` computes SHA-256 from `(subcategory, event, question)` for exact-duplicate detection. `deduplicate(rows, *, similarity_threshold=0.85)` runs a two-pass pipeline: (1) exact dedup via hash, keeping first occurrence; (2) near-duplicate flagging via `difflib.SequenceMatcher` on question text for rows sharing the same event. Returns `DeduplicationResult` dataclass with `clean_rows`, `flagged_rows`, `flagged_pairs`, `exact_duplicates_removed`, `near_duplicates_flagged`, and `total_input` property. No new dependencies — uses only stdlib (`hashlib`, `difflib`, `csv`). |
+| Near-duplicate detection | `core/dedup.py` | `_find_near_duplicates(rows, threshold)` groups rows by event, compares question text pairwise within each event using case-insensitive `SequenceMatcher.ratio()`. Both rows in a similar pair are flagged. `NearDuplicatePair` dataclass records `row_a`, `row_b`, `similarity`, and human-readable `reason`. `DEFAULT_SIMILARITY_THRESHOLD = 0.85` — configurable per call. |
+| Flagged CSV writer | `core/dedup.py` | `write_flagged_csv(flagged_rows, pairs, output_path)` writes flagged rows to CSV with the standard 10 output columns plus `similarity` and `reason` columns for reviewer context. Auto-creates parent directories. Default path: `outputs/flagged.csv`. |
+| Package exports | `core/__init__.py` | Updated — now exports `deduplicate`, `DeduplicationResult`, `NearDuplicatePair`, `DEFAULT_SIMILARITY_THRESHOLD`, `row_hash`, `write_flagged_csv` alongside existing symbols. |
+| Tests | `tests/test_dedup.py` | 41 tests across 8 classes: `TestRowHash` (deterministic, key-field-only, hex format, SHA-256 length), `TestQuestionSimilarity` (identical, case-insensitive, different, similar), `TestRemoveExactDuplicates` (no dupes, exact dupe, three copies, empty, order preservation, non-key field difference), `TestFindNearDuplicates` (no near-dupes, flagged, different events not compared, threshold boundary, similarity recording, multiple near-dupes), `TestDeduplicate` (empty, no duplicates, exact only, near only, exact-then-near ordering, total_input, custom threshold, clean excludes flagged), `TestDeduplicationResult` (defaults, total_input), `TestWriteFlaggedCsv` (file creation, columns, row count, similarity/reason content, empty input, nested directories), `TestDefaultThreshold` (value, range). All passing. |
 
 #### Task 6.2 — Schema validation
 
-- Check every row has all required fields populated
-- Validate answer_type is exactly "yes_no" or "multiple_choice"
-- Validate date fields parse as valid ISO 8601
-- Validate priority_flag is "true" or "false"
-- Any row failing validation is written to `outputs/errors.csv` with a reason column
+**Status:** **Complete** (2026-04-14)
+
+- [x] Check every row has all required fields populated
+- [x] Validate answer_type is exactly "yes_no" or "multiple_choice"
+- [x] Validate date fields parse as valid ISO 8601
+- [x] Validate priority_flag is "true" or "false"
+- [x] Any row failing validation is written to `outputs/errors.csv` with a reason column
+
+**Leave-behind notes (Task 6.2):**
+
+| What | File | Details |
+|------|------|---------|
+| Schema validation module | `core/schema_validator.py` | New module. `validate_row(row)` checks a single `OutputRow` and returns a list of failure reasons (empty = valid). `validate_rows(rows)` runs validation on all rows and returns a `ValidationResult` dataclass partitioning rows into `valid_rows` and `invalid_rows` (each carrying its failure `reasons`). Validates four rules: (1) all 10 output columns must be non-empty (whitespace-only counts as empty); (2) `answer_type` must be exactly `"yes_no"` or `"multiple_choice"` (case-sensitive); (3) `start_date`, `expiration_date`, `resolution_date` must parse as valid ISO 8601 (supports `YYYY-MM-DDTHH:MM:SS`, `YYYY-MM-DD`, and timezone-aware formats); (4) `priority_flag` must be exactly `"true"` or `"false"` (case-sensitive). No new dependencies — uses only stdlib (`csv`, `datetime`, `pathlib`, `logging`). |
+| Error CSV writer | `core/schema_validator.py` | `write_errors_csv(errors, output_path)` writes invalid rows to CSV with the standard 10 output columns plus a `reason` column. Multiple failures on the same row are semicolon-separated. Auto-creates parent directories. Default path: `outputs/errors.csv`. |
+| Dataclasses | `core/schema_validator.py` | `RowValidationError` holds a reference to the failing `OutputRow` and its `reasons: list[str]`. `ValidationResult` holds `valid_rows`, `invalid_rows`, and computed properties `total_input`, `valid_count`, `invalid_count`. |
+| Package exports | `core/__init__.py` | Updated — now exports `validate_row`, `validate_rows`, `ValidationResult`, `RowValidationError`, `write_errors_csv`, `REQUIRED_FIELDS`, `VALID_ANSWER_TYPES`, `VALID_PRIORITY_FLAGS`, `DATE_FIELDS` alongside existing EPIC 5 and 6.1 symbols. |
+| Tests | `tests/test_schema_validator.py` | 49 tests across 7 classes: `TestIsValidIso8601` (datetime no-tz, date-only, tz-aware, garbage, empty, partial, leap day valid/invalid), `TestValidateRow` (valid row, 5 missing-field variants, whitespace-only, invalid/valid answer_type, 3 invalid dates, valid dates, invalid/valid priority_flag, multiple failures, case sensitivity), `TestValidateRows` (all valid, all invalid, mixed, empty input, total_input, reasons present, identity preservation), `TestValidationResult` (defaults, properties), `TestWriteErrorsCsv` (file creation, columns, row count, reason content, empty input, nested dirs, data match, single-reason no semicolon), `TestConstants` (required fields, answer types, priority flags, date fields). All 49 passing. |
 
 #### Task 6.3 — QA summary report
 
-- After each run, print a summary to console:
-  - Total rows generated
-  - Rows passed validation
-  - Rows flagged as near-duplicate
-  - Rows written to errors
-  - Estimated API cost
+**Status:** **Complete** (2026-04-14)
+
+- [x] After each run, print a summary to console:
+  - [x] Total rows generated
+  - [x] Rows passed validation
+  - [x] Rows flagged as near-duplicate
+  - [x] Rows written to errors
+  - [x] Estimated API cost
+
+**Leave-behind notes (Task 6.3):**
+
+| What | File | Details |
+|------|------|---------|
+| QA summary module | `core/qa_summary.py` | New module. `QASummary` dataclass holds aggregated run stats: `total_rows_generated`, `rows_passed_validation`, `rows_failed_validation`, `rows_flagged_near_duplicate`, `exact_duplicates_removed`, `estimated_cost_usd` (nullable). `has_cost` property distinguishes available vs unavailable cost data. |
+| Builder function | `core/qa_summary.py` | `build_qa_summary(validation, dedup, cost=None)` accepts `ValidationResult`, `DeduplicationResult`, and optional `RunCostSummary` — the three result objects already produced by the pipeline — and returns a `QASummary`. No new dependencies. |
+| Formatter function | `core/qa_summary.py` | `format_qa_summary(summary)` returns a multi-line, human-readable string with separator bars, all five required metrics (total rows, passed validation, written to errors, flagged as near-duplicate, estimated API cost), plus exact-duplicates-removed as a bonus line. Cost displays as `$X.XXXX USD` when present, `N/A` otherwise. |
+| Console printer | `core/qa_summary.py` | `print_qa_summary(validation, dedup, cost=None, *, file=None)` is the main entry point — builds, formats, and prints the report to `sys.stdout` (or a custom `TextIO`). Also emits a structured `INFO` log via `logging`. Returns the `QASummary` for programmatic access. |
+| Package exports | `core/__init__.py` | Updated — now exports `QASummary`, `build_qa_summary`, `format_qa_summary`, `print_qa_summary` alongside existing EPIC 5, 6.1, and 6.2 symbols. |
+| Tests | `tests/test_qa_summary.py` | 35 tests across 5 classes: `TestQASummary` (has_cost true/false/zero, field access), `TestBuildQaSummary` (all valid, mixed, with/without cost, empty run, all invalid), `TestFormatQaSummary` (separators, header, all five metric values, labels, cost/N/A/zero-cost, multiline), `TestPrintQaSummary` (custom file, return value, cost object, N/A, logging, log counts, empty run, stdout default), `TestIntegration` (full pipeline round-trip, large numbers). All 35 passing. |
 
 ---
 
