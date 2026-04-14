@@ -15,6 +15,16 @@ date_rules:
     expiration_offset_hours: 0
     resolution_offset_hours: 4
 batch_size: 100
+model_pricing:
+  gpt-4o:
+    input: 2.50
+    output: 10.00
+  gpt-4o-mini:
+    input: 0.15
+    output: 0.60
+  gpt-5.4:
+    input: 2.50
+    output: 10.00
 inputs:
   directory: "inputs"
   files:
