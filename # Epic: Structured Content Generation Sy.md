@@ -7,6 +7,8 @@
 **Target Delivery:** 5 weeks from inputs received  
 **Plan status:** Office hours formalized (2026-04-13) — premises locked; alternatives and risks recorded below. **Implementation approach locked: B (2026-04-13).**
 
+**Implementation tracking:** Rollup table and task checklists live under [Implementation progress](#implementation-progress) (update as epics ship).
+
 ---
 
 ## Overview
@@ -80,14 +82,36 @@ INPUT FILES                CONFIG
 
 ---
 
+## Implementation progress
+
+**Convention:** Keep the rollup table current as epics complete. For finished epics, task subsections use Markdown checklists (`[x]` / `[ ]`). Update this file when work ships so the doc stays the single source of truth for status.
+
+| Epic | Topic | Status | Notes |
+|------|-------|--------|-------|
+| 1 | Project Setup and Environment | **Complete** | `requirements.txt`, `config/settings.yaml`, `main.py`, Flask UI (`ui/`), README setup, `.env.example`; `core/config.py` loads YAML + optional `settings.local.yaml` + `OPENAI_API_KEY` |
+| 2 | Input Parser Layer | Not started | |
+| 3 | Template and Config System | **Complete** | `templates/*.json` (6 MLB + 3 stubs); `core/template_config/` schema + loader; `templates_directory` in `config/settings.yaml`; `tests/test_templates.py` |
+| 4 | Date Logic Layer | Not started | |
+| 5 | Controlled Generation Layer | Not started | |
+| 6 | Deduplication and QA Layer | Not started | |
+| 7 | CSV Export | Not started | |
+| 8 | Local Web UI | Not started | |
+| 9 | Documentation and Handoff | Not started | |
+
+**Last updated:** 2026-04-14 (EPIC 3 marked complete)
+
+---
+
 ### EPIC 1 — Project Setup and Environment
 
 **Goal:** Get the project running locally end to end before any logic is built.
 
+**Status:** **Complete** (2026-04-14)
+
 #### Task 1.1 — Repository and folder structure
 
-- Initialize project repo in Cursor
-- Define folder structure:
+- [x] Initialize project repo in Cursor
+- [x] Define folder structure:
   ```
   /inputs          # user drops source files here
   /outputs         # generated CSVs land here
@@ -102,31 +126,31 @@ INPUT FILES                CONFIG
 
 #### Task 1.2 — Dependencies and requirements.txt
 
-- Python 3.10+
-- `openai` — LLM API calls
-- `pandas` — input file parsing and CSV export
-- `openpyxl` — xlsx reading
-- `flask` — local web UI
-- `pyyaml` — config file parsing
-- `python-dateutil` — date arithmetic
-- `jinja2` — prompt templating
+- [x] Python 3.10+ (required; documented in README)
+- [x] `openai` — LLM API calls
+- [x] `pandas` — input file parsing and CSV export
+- [x] `openpyxl` — xlsx reading
+- [x] `flask` — local web UI
+- [x] `pyyaml` — config file parsing
+- [x] `python-dateutil` — date arithmetic
+- [x] `jinja2` — prompt templating
 
 #### Task 1.3 — Python installation documentation
 
-- Write a setup section in README covering:
-  - How to check if Python is installed (`python --version`)
-  - Where to download Python 3.10+ (python.org)
-  - How to create a virtual environment (`python -m venv venv`)
-  - How to activate it (Mac/Linux vs Windows)
-  - How to install dependencies (`pip install -r requirements.txt`)
-  - How to add the OpenAI API key to environment or config
+- [x] Write a setup section in README covering:
+  - [x] How to check if Python is installed (`python --version`)
+  - [x] Where to download Python 3.10+ (python.org)
+  - [x] How to create a virtual environment (`python -m venv venv`)
+  - [x] How to activate it (Mac/Linux vs Windows)
+  - [x] How to install dependencies (`pip install -r requirements.txt`)
+  - [x] How to add the OpenAI API key to environment or config
 
 #### Task 1.4 — Global config file (config/settings.yaml)
 
-- Define all user-editable parameters in one place:
+- [x] Define all user-editable parameters in one place (committed `config/settings.yaml`; optional gitignored `config/settings.local.yaml`; `OPENAI_API_KEY` env override implemented in `core/config.py`):
   ```yaml
   openai_api_key: ""
-  model: "gpt-4o"
+  model: "gpt-5.4"
   category_id: ""
   date_filter:
     start: "2026-05-15"
@@ -190,10 +214,12 @@ INPUT FILES                CONFIG
 
 **Goal:** Define all question generation logic in config files, not in code, so new categories can be added without a code change.
 
+**Status:** **Complete** (2026-04-14)
+
 #### Task 3.1 — Template schema definition
 
-- Each template is a JSON file in `/templates`
-- Standard template fields:
+- [x] Each template is a JSON file in `/templates`
+- [x] Standard template fields:
   ```json
   {
     "id": "mlb_game_winner",
@@ -206,7 +232,7 @@ INPUT FILES                CONFIG
     "requires_entities": false
   }
   ```
-- Entity-based templates include additional fields:
+- [x] Entity-based templates include additional fields:
   ```json
   {
     "id": "mlb_home_run",
@@ -222,27 +248,27 @@ INPUT FILES                CONFIG
 
 #### Task 3.2 — MLB Phase 1 templates (game-level)
 
-- Template: Game Winner
-- Template: Win by more than 2 runs (yes/no)
-- Template: Total runs exceed 8.5 (yes/no)
+- [x] Template: Game Winner (`mlb_game_winner.json`)
+- [x] Template: Win by more than 2 runs (yes/no) (`mlb_win_margin_2.json`)
+- [x] Template: Total runs exceed 8.5 (yes/no) (`mlb_total_runs_over_8_5.json`)
 
 #### Task 3.3 — MLB Phase 1 templates (player/stat-level)
 
-- Template: Who will hit a home run? (HR, top 2 per team)
-- Template: Which player will record an RBI? (RBI, top 2 per team)
-- Template: Who is more likely to steal a base? (SB, top 2 per team)
+- [x] Template: Who will hit a home run? (HR, top 2 per team) (`mlb_home_run.json`)
+- [x] Template: Which player will record an RBI? (RBI, top 2 per team) (`mlb_rbi.json`)
+- [x] Template: Who is more likely to steal a base? (SB, top 2 per team) (`mlb_steal_base.json`)
 
 #### Task 3.4 — Stub templates for future categories
 
-- Create empty template files for markets, news, entertainment
-- Same schema, placeholder values
-- Comment in each: "extend by adding question and input package definition"
+- [x] Create placeholder template files for markets, news, entertainment (`*_placeholder.json`)
+- [x] Same schema, placeholder values
+- [x] Comment in each (`_comment`): "extend by adding question and input package definition"
 
 ---
 
 ### EPIC 4 — Date Logic Layer
 
-**Goal:** Deterministically compute all three date fields from event datetime and config rules. No LLM involvement.
+**Goal:** Deterministically compute all three date fields from event datetime and config rules.
 
 #### Task 4.1 — Date rule engine
 
