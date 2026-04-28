@@ -94,11 +94,11 @@ INPUT FILES                CONFIG
 | 4 | Date Logic Layer | **Complete** | `core/date_rules.py` (engine); `config/settings.yaml` `date_rules` section (configurable offsets); `tests/test_date_rules.py` (6 passing tests); exported via `core/__init__.py` |
 | 5 | Controlled Generation Layer | **In progress** | Tasks 5.1, 5.2, 5.3 complete |
 | 6 | Deduplication and QA Layer | **In progress** | Task 6.1 complete |
-| 7 | CSV Export | Not started | |
+| 7 | CSV Export | **Complete** | `core/csv_export.py` — `write_generated_csv`, `write_generated_csv_auto`, `build_generated_csv_path`, `sanitize_filename_component`, `DEFAULT_OUTPUT_DIR`; `tests/test_csv_export.py` |
 | 8 | Local Web UI | Not started | |
 | 9 | Documentation and Handoff | Not started | |
 
-**Last updated:** 2026-04-14 (EPIC 6 Task 6.1 complete)
+**Last updated:** 2026-04-17 (EPIC 7 complete)
 
 ---
 
@@ -476,17 +476,32 @@ INPUT FILES                CONFIG
 
 **Goal:** Write a clean, upload-ready CSV with correct column names and formatting.
 
+**Status:** **Complete** (2026-04-17)
+
 #### Task 7.1 — CSV writer
 
-- Column order matches client schema exactly
-- No index column
-- UTF-8 encoding
-- Output filename: `outputs/generated_{subcategory}_{date_window}_{timestamp}.csv`
+**Status:** **Complete** (2026-04-17)
+
+- [x] Column order matches client schema exactly
+- [x] No index column
+- [x] UTF-8 encoding
+- [x] Output filename: `outputs/generated_{subcategory}_{date_window}_{timestamp}.csv`
 
 #### Task 7.2 — Output directory management
 
-- Auto-create `/outputs` if it doesn't exist
-- Never overwrite a previous output — always timestamp the filename
+**Status:** **Complete** (2026-04-17)
+
+- [x] Auto-create `/outputs` if it doesn't exist
+- [x] Never overwrite a previous output — always timestamp the filename
+
+**Leave-behind notes (EPIC 7):**
+
+| What | File | Details |
+|------|------|---------|
+| Main CSV export | `core/csv_export.py` | `write_generated_csv(rows, path)` writes UTF-8 CSV via `csv.DictWriter` with `OUTPUT_COLUMNS` only (no index column). `build_generated_csv_path(subcategory, date_window_start, date_window_end, …)` builds `generated_{sanitized_subcategory}_{start}_to_{end}_{timestamp}.csv` under project `outputs/` by default; timestamp uses `%Y%m%d_%H%M%S_%f` (microseconds) so successive runs never collide. `write_generated_csv_auto(rows, subcategory=…, date_filter=…)` combines path build + write. `sanitize_filename_component()` restricts subcategory to safe path segments. |
+| Default output dir | `core/csv_export.py` | `DEFAULT_OUTPUT_DIR` = repo `outputs/` resolved from `Path(__file__)`, not process cwd. |
+| Package exports | `core/__init__.py` | Exports `DEFAULT_OUTPUT_DIR`, `build_generated_csv_path`, `sanitize_filename_component`, `write_generated_csv`, `write_generated_csv_auto`. |
+| Tests | `tests/test_csv_export.py` | 17 tests: sanitize, path pattern, date slash normalization, unique paths, column order, UTF-8, nested mkdir, empty rows header-only, auto writer, default dir. |
 
 ---
 

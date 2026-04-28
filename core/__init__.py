@@ -1,6 +1,13 @@
 """Core package exports."""
 
 from .config import load_settings
+from .csv_export import (
+    DEFAULT_OUTPUT_DIR,
+    build_generated_csv_path,
+    sanitize_filename_component,
+    write_generated_csv,
+    write_generated_csv_auto,
+)
 from .date_rules import QuestionDates, compute_question_dates
 from .dedup import (
     DEFAULT_SIMILARITY_THRESHOLD,
@@ -31,6 +38,7 @@ from .generation import (
     TokenUsage,
 )
 from .parsers import load_normalized_bundle
+from .pipeline import PipelineResult, run_pipeline
 from .qa_summary import (
     QASummary,
     build_qa_summary,
@@ -55,6 +63,8 @@ __all__ = [
     "build_cost_summary",
     "build_event_string",
     "compute_question_dates",
+    "DEFAULT_OUTPUT_DIR",
+    "build_generated_csv_path",
     "deduplicate",
     "DeduplicationResult",
     "DEFAULT_SIMILARITY_THRESHOLD",
@@ -65,18 +75,21 @@ __all__ = [
     "GeneratedQuestionBatch",
     "load_normalized_bundle",
     "load_settings",
+    "PipelineResult",
     "log_cost_summary",
     "NearDuplicatePair",
     "OUTPUT_COLUMNS",
     "OutputRow",
     "PromptBuilder",
     "print_qa_summary",
+    "run_pipeline",
     "PromptConfig",
     "PromptItem",
     "QASummary",
     "QuestionDates",
     "REQUIRED_FIELDS",
     "row_hash",
+    "sanitize_filename_component",
     "RowAssembler",
     "RowValidationError",
     "RunCostSummary",
@@ -90,4 +103,6 @@ __all__ = [
     "ValidationResult",
     "write_errors_csv",
     "write_flagged_csv",
+    "write_generated_csv",
+    "write_generated_csv_auto",
 ]

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 import re
 import zipfile
@@ -21,6 +21,16 @@ FIELD_ALIASES: dict[str, set[str]] = {
     "event_name": {"event name", "event_name", "matchup", "event"},
     "event_date": {"event date", "event_date", "date", "game date"},
     "event_time": {"event time", "event_time", "time", "start time"},
+    "player_id": {
+        "player id",
+        "player_id",
+        "playerid",
+        "mlbam id",
+        "person id",
+        "person_id",
+        "athlete id",
+        "athlete_id",
+    },
     "home_team": {"home team", "home_team", "home"},
     "away_team": {"away team", "away_team", "away"},
     "player_name": {"player", "player name", "name", "batter"},
@@ -39,6 +49,30 @@ class DetectionResult:
 
     detected_file: DetectedFile
     issues: list[ValidationIssue]
+    sheet_detections: list["DetectedSheet"] = field(default_factory=list)
+
+
+@dataclass
+class DetectedSheet:
+    """One detected workbook sheet before file-level selection."""
+
+    sheet_name: str
+    sheet_index: int
+    source_role: SourceRole
+    header_row_index: int
+    columns: list[str]
+    field_mappings: dict[str, str]
+    confidence: float
+    records: list[dict[str, Any]]
+
+
+@dataclass
+class WorkbookDetectionResult:
+    """Workbook-level detection result with all candidate sheets."""
+
+    detected_file: DetectedFile
+    issues: list[ValidationIssue]
+    sheet_detections: list[DetectedSheet] = field(default_factory=list)
 
 
 def _normalize_label(value: Any) -> str:
@@ -197,52 +231,99 @@ def _build_records(frame: pd.DataFrame, header_row_index: int) -> tuple[list[str
     header_values = [str(value).strip() for value in frame.iloc[header_row_index].tolist()]
     data_frame = frame.iloc[header_row_index + 1 :].copy()
     data_frame.columns = header_values
-    data_frame = data_frame.dropna(how="all").fillna("")
+    data_frame = data_frame.dropna(how="all")
+    # Avoid pandas 2.x FutureWarning from fillna("") on object/mixed columns.
+    data_frame = data_frame.map(lambda x: "" if pd.isna(x) else x)
     columns = [column for column in header_values if column]
     if columns:
         data_frame = data_frame.loc[:, columns]
     return columns, data_frame.to_dict(orient="records")
 
 
-def inspect_file(
+def _build_detected_sheet(
+    *,
+    frame: pd.DataFrame,
+    sheet_name: str,
+    sheet_index: int,
+    profile: InputProfile | None,
+    preferred_role: SourceRole | None,
+) -> DetectedSheet:
+    uses_profile = profile is not None and profile.sheet_name == sheet_name
+    header_row_index = profile.header_row_index if uses_profile else _detect_header_row(frame)
+    columns, records = _build_records(frame, header_row_index)
+    field_mappings = profile.field_mappings if uses_profile else _canonical_field_mappings(columns)
+    source_role = preferred_role if uses_profile and preferred_role is not None else _infer_source_role(field_mappings)
+    confidence = min(
+        1.0,
+        (len(field_mappings) / max(len(columns), 1)) + (0.25 if source_role != SourceRole.UNKNOWN else 0.0),
+    )
+    return DetectedSheet(
+        sheet_name=sheet_name,
+        sheet_index=sheet_index,
+        source_role=source_role,
+        header_row_index=header_row_index,
+        columns=columns,
+        field_mappings=field_mappings,
+        confidence=confidence,
+        records=records,
+    )
+
+
+def _choose_sheet(
+    sheets: list[DetectedSheet],
+    *,
+    profile: InputProfile | None,
+    preferred_sheet_terms: tuple[str, ...],
+) -> DetectedSheet | None:
+    if not sheets:
+        return None
+    chosen = sheets[0]
+    if preferred_sheet_terms:
+        lowered_terms = tuple(term.lower() for term in preferred_sheet_terms)
+        for sheet in sheets:
+            if any(term in sheet.sheet_name.lower() for term in lowered_terms):
+                chosen = sheet
+                break
+    if profile:
+        for sheet in sheets:
+            if sheet.sheet_name == profile.sheet_name:
+                chosen = sheet
+                break
+    return chosen
+
+
+def inspect_workbook(
     filepath: str | Path,
     *,
     category_key: str,
     preferred_role: SourceRole | None = None,
     preferred_sheet_terms: tuple[str, ...] = (),
-) -> DetectionResult:
-    """Inspect one file and infer a reusable parse profile."""
+) -> WorkbookDetectionResult:
+    """Inspect all readable sheets in one workbook."""
 
     path = Path(filepath)
     profile = match_profile(path, category_key=category_key, source_role=preferred_role)
     issues: list[ValidationIssue] = []
     sheets = _read_workbook_sheets(path)
-    sheet_order = list(sheets)
-    chosen_sheet_name = sheet_order[0] if sheet_order else None
-    if preferred_sheet_terms:
-        lowered_terms = tuple(term.lower() for term in preferred_sheet_terms)
-        for sheet_name in sheet_order:
-            if any(term in sheet_name.lower() for term in lowered_terms):
-                chosen_sheet_name = sheet_name
-                break
-    if profile and profile.sheet_name in sheets:
-        chosen_sheet_name = profile.sheet_name
-
-    if chosen_sheet_name is None:
+    sheet_detections = [
+        _build_detected_sheet(
+            frame=frame,
+            sheet_name=sheet_name,
+            sheet_index=sheet_index,
+            profile=profile,
+            preferred_role=preferred_role,
+        )
+        for sheet_index, (sheet_name, frame) in enumerate(sheets.items())
+    ]
+    chosen_sheet = _choose_sheet(
+        sheet_detections,
+        profile=profile,
+        preferred_sheet_terms=preferred_sheet_terms,
+    )
+    if chosen_sheet is None:
         raise FileNotFoundError(f"No readable sheets found in {path}")
 
-    frame = sheets[chosen_sheet_name]
-    header_row_index = profile.header_row_index if profile else _detect_header_row(frame)
-    columns, records = _build_records(frame, header_row_index)
-    field_mappings = profile.field_mappings if profile else _canonical_field_mappings(columns)
-    source_role = preferred_role or (profile.source_role if profile else _infer_source_role(field_mappings))
-
-    confidence = min(
-        1.0,
-        (len(field_mappings) / max(len(columns), 1)) + (0.25 if source_role != SourceRole.UNKNOWN else 0.0),
-    )
-
-    if source_role == SourceRole.UNKNOWN:
+    if chosen_sheet.source_role == SourceRole.UNKNOWN:
         issues.append(
             ValidationIssue(
                 code="unknown_source_role",
@@ -255,26 +336,51 @@ def inspect_file(
     detected = DetectedFile(
         file_path=path,
         format_name=path.suffix.lower().lstrip(".") or "unknown",
-        source_role=source_role,
-        sheet_name=chosen_sheet_name,
-        header_row_index=header_row_index,
-        columns=columns,
-        field_mappings=field_mappings,
-        confidence=confidence,
-        records=records,
+        source_role=preferred_role or (profile.source_role if profile else chosen_sheet.source_role),
+        sheet_name=chosen_sheet.sheet_name,
+        header_row_index=chosen_sheet.header_row_index,
+        columns=chosen_sheet.columns,
+        field_mappings=chosen_sheet.field_mappings,
+        confidence=chosen_sheet.confidence,
+        records=chosen_sheet.records,
         profile_used=profile
         or InputProfile(
             profile_name=path.stem,
             category_key=category_key,
             file_pattern=path.name,
-            source_role=source_role,
+            source_role=preferred_role or chosen_sheet.source_role,
             format_name=path.suffix.lower().lstrip(".") or "unknown",
-            sheet_name=chosen_sheet_name,
-            header_row_index=header_row_index,
-            field_mappings=field_mappings,
+            sheet_name=chosen_sheet.sheet_name,
+            header_row_index=chosen_sheet.header_row_index,
+            field_mappings=chosen_sheet.field_mappings,
             fingerprint=fingerprint_file(path),
-            confidence=confidence,
+            confidence=chosen_sheet.confidence,
         ),
     )
-    return DetectionResult(detected_file=detected, issues=issues)
+    return WorkbookDetectionResult(
+        detected_file=detected,
+        issues=issues,
+        sheet_detections=sheet_detections,
+    )
+
+
+def inspect_file(
+    filepath: str | Path,
+    *,
+    category_key: str,
+    preferred_role: SourceRole | None = None,
+    preferred_sheet_terms: tuple[str, ...] = (),
+) -> DetectionResult:
+    """Inspect one file and infer a reusable parse profile."""
+    result = inspect_workbook(
+        filepath,
+        category_key=category_key,
+        preferred_role=preferred_role,
+        preferred_sheet_terms=preferred_sheet_terms,
+    )
+    return DetectionResult(
+        detected_file=result.detected_file,
+        issues=result.issues,
+        sheet_detections=result.sheet_detections,
+    )
 

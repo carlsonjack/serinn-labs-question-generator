@@ -9,6 +9,7 @@ from .contracts import NormalizedBundle, SourceRole, ValidationIssue, Validation
 from .detector import inspect_file
 from .profiles import save_profile
 from .registry import get_category_normalizer
+from .season_merge import infer_merge_profile_options
 
 # Register built-in category normalizers.
 from .mlb import normalizer as _mlb_normalizer  # noqa: F401
@@ -49,6 +50,14 @@ def load_normalized_bundle(
             preferred_role=role,
             preferred_sheet_terms=sheet_terms,
         )
+        if (
+            role == SourceRole.METRIC_SOURCE
+            and detection.detected_file.profile_used is not None
+            and len(detection.sheet_detections) > 1
+        ):
+            detection.detected_file.profile_used.normalizer_options.update(
+                infer_merge_profile_options(detection)
+            )
         issues.extend(detection.issues)
         detected_files.append(detection.detected_file)
         if settings.get("parsing", {}).get("persist_profiles", True):

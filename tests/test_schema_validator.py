@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from core.csv_export import CSV_WRITE_ENCODING
 from core.generation.row_assembler import OUTPUT_COLUMNS, OutputRow
 from core.schema_validator import (
     DATE_FIELDS,
@@ -257,7 +258,7 @@ class TestWriteErrorsCsv:
             [RowValidationError(row=_make_row(), reasons=["oops"])],
             output_path=out,
         )
-        with out.open(encoding="utf-8") as fh:
+        with out.open(encoding=CSV_WRITE_ENCODING) as fh:
             reader = csv.DictReader(fh)
             assert reader.fieldnames == OUTPUT_COLUMNS + ["reason"]
 
@@ -268,7 +269,7 @@ class TestWriteErrorsCsv:
             RowValidationError(row=_make_row(question="Q2"), reasons=["b"]),
         ]
         write_errors_csv(errors, output_path=out)
-        with out.open(encoding="utf-8") as fh:
+        with out.open(encoding=CSV_WRITE_ENCODING) as fh:
             rows = list(csv.DictReader(fh))
         assert len(rows) == 2
 
@@ -278,14 +279,14 @@ class TestWriteErrorsCsv:
             [RowValidationError(row=_make_row(), reasons=["bad type", "bad date"])],
             output_path=out,
         )
-        with out.open(encoding="utf-8") as fh:
+        with out.open(encoding=CSV_WRITE_ENCODING) as fh:
             rows = list(csv.DictReader(fh))
         assert rows[0]["reason"] == "bad type; bad date"
 
     def test_empty_input(self, tmp_path: Path) -> None:
         out = tmp_path / "errors.csv"
         write_errors_csv([], output_path=out)
-        with out.open(encoding="utf-8") as fh:
+        with out.open(encoding=CSV_WRITE_ENCODING) as fh:
             rows = list(csv.DictReader(fh))
         assert len(rows) == 0
 
@@ -304,7 +305,7 @@ class TestWriteErrorsCsv:
             [RowValidationError(row=row, reasons=["test"])],
             output_path=out,
         )
-        with out.open(encoding="utf-8") as fh:
+        with out.open(encoding=CSV_WRITE_ENCODING) as fh:
             rows = list(csv.DictReader(fh))
         assert rows[0]["subcategory"] == "NBA"
         assert rows[0]["event"] == "Celtics vs Lakers"
@@ -315,7 +316,7 @@ class TestWriteErrorsCsv:
             [RowValidationError(row=_make_row(), reasons=["one issue"])],
             output_path=out,
         )
-        with out.open(encoding="utf-8") as fh:
+        with out.open(encoding=CSV_WRITE_ENCODING) as fh:
             rows = list(csv.DictReader(fh))
         assert ";" not in rows[0]["reason"]
 

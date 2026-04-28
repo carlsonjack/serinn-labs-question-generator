@@ -14,6 +14,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Sequence
 
+from core.csv_export import CSV_WRITE_ENCODING
 from core.generation.row_assembler import OUTPUT_COLUMNS, OutputRow
 
 logger = logging.getLogger(__name__)
@@ -155,7 +156,7 @@ def write_errors_csv(
 
     fieldnames = OUTPUT_COLUMNS + ["reason"]
 
-    with path.open("w", newline="", encoding="utf-8") as fh:
+    with path.open("w", newline="", encoding=CSV_WRITE_ENCODING) as fh:
         writer = csv.DictWriter(fh, fieldnames=fieldnames)
         writer.writeheader()
         for error in errors:

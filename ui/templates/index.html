@@ -5,22 +5,1098 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Serinn Labs — Question Generator</title>
     <style>
+      :root {
+        --bg: #f6f7f9;
+        --card: #fff;
+        --border: #d8ddea;
+        --text: #1a1f2e;
+        --muted: #5c6578;
+        --accent: #1e4d8c;
+        --err: #a42020;
+        --ok: #1a6b3a;
+      }
+      * {
+        box-sizing: border-box;
+      }
       body {
-        font-family: system-ui, sans-serif;
-        max-width: 40rem;
-        margin: 2rem auto;
-        padding: 0 1rem;
+        font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+        margin: 0;
+        background: var(--bg);
+        color: var(--text);
         line-height: 1.5;
+      }
+      .wrap {
+        max-width: 44rem;
+        margin: 0 auto;
+        padding: 1.5rem 1rem 3rem;
+      }
+      h1 {
+        font-size: 1.35rem;
+        font-weight: 600;
+        margin: 0 0 0.25rem;
+      }
+      .sub {
+        color: var(--muted);
+        font-size: 0.9rem;
+        margin-bottom: 1.5rem;
+      }
+      section {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 1rem 1.1rem;
+        margin-bottom: 1rem;
+      }
+      section h2 {
+        font-size: 0.85rem;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: var(--muted);
+        margin: 0 0 0.75rem;
+        font-weight: 600;
+      }
+      label {
+        display: block;
+        font-size: 0.9rem;
+        margin-bottom: 0.2rem;
+      }
+      input[type="text"],
+      input[type="number"],
+      input[type="date"] {
+        width: 100%;
+        padding: 0.45rem 0.5rem;
+        border: 1px solid var(--border);
+        border-radius: 4px;
+        font: inherit;
+        margin-bottom: 0.65rem;
+      }
+      .row2 {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 0.75rem;
+      }
+      .drop {
+        border: 2px dashed var(--border);
+        border-radius: 6px;
+        padding: 1rem;
+        text-align: center;
+        font-size: 0.9rem;
+        color: var(--muted);
+        margin-bottom: 0.5rem;
+        cursor: pointer;
+      }
+      .drop.dragover {
+        border-color: var(--accent);
+        background: #eef3fb;
+      }
+      .drop strong {
+        color: var(--text);
+      }
+      .drop.has-file {
+        border-style: solid;
+        border-color: #9eb4d6;
+        background: #f8faff;
+      }
+      .drop.saved {
+        border-color: var(--ok);
+        background: #ecf8ef;
+      }
+      .target-name {
+        font-size: 0.8rem;
+        margin-top: 0.35rem;
+      }
+      .slot-line {
+        font-size: 0.82rem;
+        margin: 0.25rem 0 0.65rem;
+        min-height: 1.2rem;
+      }
+      select#input_category_key {
+        width: 100%;
+        padding: 0.45rem 0.5rem;
+        border: 1px solid var(--border);
+        border-radius: 4px;
+        font: inherit;
+        margin-bottom: 0.75rem;
+      }
+      .tpls {
+        display: grid;
+        gap: 0.35rem;
+        font-size: 0.9rem;
+      }
+      .tpls label {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        margin: 0;
+        font-weight: 400;
+      }
+      .actions {
+        display: flex;
+        gap: 0.75rem;
+        align-items: center;
+        flex-wrap: wrap;
+      }
+      button {
+        font: inherit;
+        padding: 0.5rem 1rem;
+        border-radius: 4px;
+        border: none;
+        cursor: pointer;
+        background: var(--accent);
+        color: #fff;
+      }
+      button:disabled {
+        opacity: 0.55;
+        cursor: not-allowed;
+      }
+      .status {
+        font-size: 0.9rem;
+        padding: 0.5rem 0.65rem;
+        border-radius: 4px;
+        background: #eef1f6;
+        border: 1px solid var(--border);
+        min-height: 2.5rem;
+      }
+      .status.error {
+        background: #fdecec;
+        border-color: #e8b4b4;
+        color: var(--err);
+      }
+      .status.ok {
+        background: #ecf8ef;
+        border-color: #a8d4b4;
+        color: var(--ok);
+      }
+      .summary {
+        font-size: 0.88rem;
+        white-space: pre-wrap;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        background: #f0f2f6;
+        padding: 0.65rem;
+        border-radius: 4px;
+        margin-top: 0.5rem;
+      }
+      .downloads a {
+        display: inline-block;
+        margin-right: 0.75rem;
+        margin-top: 0.35rem;
+        color: var(--accent);
+        font-weight: 500;
+      }
+      .muted {
+        color: var(--muted);
+        font-size: 0.85rem;
+      }
+      .small {
+        font-size: 0.82rem;
+      }
+      input[type="file"] {
+        display: none;
+      }
+      .tpl-card {
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        margin-bottom: 0.6rem;
+        background: #fafbfc;
+      }
+      .tpl-card summary {
+        cursor: pointer;
+        padding: 0.5rem 0.65rem;
+        font-size: 0.9rem;
+        list-style: none;
+        display: flex;
+        align-items: flex-start;
+        gap: 0.5rem;
+      }
+      .tpl-card summary::-webkit-details-marker {
+        display: none;
+      }
+      .tpl-card .sum-main {
+        flex: 1;
+      }
+      .tpl-card .tpl-meta {
+        font-size: 0.8rem;
+        color: var(--muted);
+        font-weight: normal;
+      }
+      .tpl-card .tpl-body {
+        padding: 0 0.65rem 0.65rem 2rem;
+        border-top: 1px solid var(--border);
+      }
+      .preview-q {
+        font-style: italic;
+        margin: 0.5rem 0 0.25rem;
+        font-size: 0.92rem;
+      }
+      .expl {
+        margin: 0.35rem 0;
+        font-size: 0.86rem;
+        color: var(--text);
+      }
+      .tpl-upload-zone {
+        border: 2px dashed var(--border);
+        border-radius: 6px;
+        padding: 0.75rem;
+        font-size: 0.9rem;
+        margin-top: 0.35rem;
+        cursor: pointer;
+      }
+      button.secondary {
+        background: #5c6578;
+      }
+      button.ghost {
+        background: #eef1f6;
+        color: var(--text);
+        border: 1px solid var(--border);
+      }
+      details.inputs-def {
+        margin-bottom: 0.85rem;
+        padding-bottom: 0.65rem;
+        border-bottom: 1px solid var(--border);
+      }
+      details.inputs-def summary {
+        cursor: pointer;
+        font-weight: 600;
+        font-size: 0.92rem;
+        margin-bottom: 0.5rem;
+      }
+      .pkg-card {
+        border: 1px solid var(--border);
+        border-radius: 6px;
+        padding: 0.65rem 0.75rem;
+        margin-bottom: 0.65rem;
+        background: #fafbfc;
+      }
+      .pkg-head {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 0.5rem;
+        margin-bottom: 0.5rem;
+      }
+      .pkg-head label {
+        margin: 0;
+        font-size: 0.9rem;
+      }
+      .pkg-key-inp {
+        width: auto;
+        min-width: 9rem;
+        margin-bottom: 0;
+        display: inline-block;
+      }
+      .slot-row {
+        display: grid;
+        grid-template-columns: 1fr 1fr auto;
+        gap: 0.5rem;
+        align-items: center;
+        margin-bottom: 0.4rem;
+      }
+      .slot-row input {
+        margin-bottom: 0;
+      }
+      .slot-row button {
+        padding: 0.35rem 0.6rem;
+        font-size: 0.85rem;
       }
     </style>
   </head>
   <body>
-    <h1>Serinn Labs — Structured Content Generation</h1>
-    <p>Local setup is working. Generation and upload flows will connect here in later epics.</p>
-    <p>
-      <strong>Model (from config):</strong>
-      {{ model or "(not set)" }}<br />
-      <strong>Category ID:</strong> {{ category_id or "(not set)" }}
-    </p>
+    <div class="wrap">
+      <h1>Structured content generation</h1>
+      <p class="sub">
+        Upload the input files defined in <code>config/settings.yaml</code> under
+        <code>inputs.files</code>, then generate. Output files are written to
+        <code>{{ output_dir }}</code>.
+      </p>
+
+      <section>
+        <h2>Input files</h2>
+        <details class="inputs-def" open>
+          <summary>Define packages &amp; file slots</summary>
+          <p class="muted small" style="margin: 0.35rem 0 0.65rem">
+            Each <strong>package</strong> (e.g. <code>mlb</code>) maps <strong>slot ids</strong> to the
+            filename used under <code>inputs/</code> when you upload. Slot ids should match your input
+            profiles (e.g. <code>event_source</code>, <code>metric_source</code>).
+          </p>
+          <div id="inputs-files-root"></div>
+          <div class="actions" style="margin-top: 0.35rem">
+            <button type="button" class="ghost" id="btn-add-input-pkg">Add package</button>
+            <button type="button" id="btn-save-inputs-files">Save definitions</button>
+            <span class="muted" id="inputs-files-msg"></span>
+          </div>
+        </details>
+
+        <label for="input_category_key">Input package</label>
+        <select id="input_category_key" autocomplete="off">
+          {% for c in input_categories %}
+          <option value="{{ c }}" {% if c == input_category_key %}selected{% endif %}>{{ c }}</option>
+          {% endfor %}
+        </select>
+        <p class="muted" style="margin-top: -0.35rem; margin-bottom: 0.65rem">
+          Choose which package’s uploads to use, then drop files below.
+        </p>
+
+        <div id="input-slots-root">
+          {% if not input_slots %}
+          <p class="muted">
+            No input slots — add <code>inputs.files.&lt;package&gt;</code> in settings.
+          </p>
+          {% endif %}
+          {% for s in input_slots %}
+          <div class="input-slot-wrap" data-slot-id="{{ s.slot_id }}">
+            <div
+              class="drop"
+              id="drop-{{ s.slot_id }}"
+              data-input="file-{{ s.slot_id }}"
+              tabindex="0"
+            >
+              <strong>{{ s.label }}</strong> — drop <code>.xlsx</code> here or click
+              <div class="target-name muted">
+                Saved as <code>{{ s.target_filename }}</code>
+              </div>
+            </div>
+            <input
+              type="file"
+              id="file-{{ s.slot_id }}"
+              class="slot-file"
+              data-slot-id="{{ s.slot_id }}"
+              accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            />
+            <div class="slot-line muted" id="line-{{ s.slot_id }}"></div>
+          </div>
+          {% endfor %}
+        </div>
+
+        <div class="actions">
+          <button type="button" id="btn-upload">Save uploads to inputs/</button>
+          <span class="muted" id="upload-msg"></span>
+        </div>
+      </section>
+
+      <section>
+        <h2>Configuration</h2>
+        <div class="row2">
+          <div>
+            <label for="date_start">Date start</label>
+            <input type="text" id="date_start" value="{{ settings.date_filter.start }}" placeholder="YYYY-MM-DD" />
+          </div>
+          <div>
+            <label for="date_end">Date end</label>
+            <input type="text" id="date_end" value="{{ settings.date_filter.end }}" placeholder="YYYY-MM-DD" />
+          </div>
+        </div>
+        <label for="category_id">Category ID</label>
+        <input type="text" id="category_id" value="{{ settings.category_id or '' }}" />
+
+        <label for="subcategory">Subcategory label</label>
+        <input type="text" id="subcategory" value="{{ settings.subcategory or 'MLB' }}" />
+        <p class="muted small" style="margin-top: -0.35rem">
+          This label is saved with generated output. The template list below follows the selected
+          input package.
+        </p>
+
+        <label for="top_n">Top N per team (entity questions)</label>
+        <input type="number" id="top_n" min="1" max="50" value="{{ settings.top_n_per_team or 3 }}" />
+
+        <label for="max_q">Max questions to generate</label>
+        <input
+          type="number"
+          id="max_q"
+          min="1"
+          placeholder="No limit"
+          value="{% if settings.get('max_generated_questions') is not none %}{{ settings.max_generated_questions }}{% endif %}"
+        />
+        <p class="muted small" style="margin-top: -0.35rem">
+          After expanding <em>games × enabled templates</em>, only the first N rows are sent to the
+          API. Leave empty to generate all matching rows. Use this to sample or cap cost.
+        </p>
+
+        <h2 style="margin-top: 1rem" id="template-heading">Templates ({{ template_subcategory }})</h2>
+        <p class="muted small" id="template-help" style="margin-top: -0.25rem">
+          Only templates matching the selected input package are shown. Open a row for a preview
+          and what enabling it does.
+        </p>
+        <div class="tpls" id="template-checkboxes">
+          {% if not template_meta %}
+          <p class="muted">No templates match the selected input package yet.</p>
+          {% endif %}
+          {% for t in template_meta %}
+          <details class="tpl-card" {% if t.enabled %}open{% endif %}>
+            <summary>
+              <input
+                type="checkbox"
+                data-tid="{{ t.id }}"
+                {% if t.enabled %}checked{% endif %}
+                onclick="event.stopPropagation()"
+                aria-label="Enable {{ t.id }}"
+              />
+              <span class="sum-main">
+                <strong>{{ t.id }}</strong>
+                <span class="tpl-meta">
+                  {{ t.subcategory }} · {{ t.question_family }} · {{ t.answer_type }}{% if t.line is not none %} · line {{ t.line }}{% endif %}{% if t.stat_column %} · stat {{ t.stat_column }}{% endif %}
+                </span>
+              </span>
+            </summary>
+            <div class="tpl-body">
+              <p class="preview-q">“{{ t.preview_question }}”</p>
+              <p class="muted small">Answer options pattern: <code>{{ t.preview_answer_options }}</code></p>
+              {% for line in t.explainer %}
+              <p class="expl">{{ line }}</p>
+              {% endfor %}
+            </div>
+          </details>
+          {% endfor %}
+        </div>
+
+        <h2 style="margin-top: 1rem">Add template</h2>
+        <p class="muted small">
+          Upload a template <code>.csv</code> or <code>.json</code>. CSV uploads can contain repeated
+          2-row blocks: one header row, one value row, then the next template. Valid uploads are
+          saved and enabled automatically; reload is handled for you.
+        </p>
+        <div class="tpl-upload-zone" id="tpl-upload-zone" tabindex="0">
+          <strong>Add template file</strong> — drop CSV or JSON file(s) here or click
+        </div>
+        <input type="file" id="tpl-files" accept=".csv,.json,text/csv,application/json" multiple />
+        <div class="actions" style="margin-top: 0.5rem">
+          <button type="button" id="btn-tpl-upload">Upload</button>
+          <span class="muted" id="tpl-upload-msg"></span>
+        </div>
+      </section>
+
+      <section>
+        <h2>Run</h2>
+        <div class="actions">
+          <button type="button" id="btn-run">Generate</button>
+          <span class="muted" id="run-hint"></span>
+        </div>
+        <div class="status" id="status-line"></div>
+        <div class="summary" id="summary" hidden></div>
+        <div class="downloads" id="downloads"></div>
+      </section>
+    </div>
+
+    <script>
+      (function () {
+        const $ = (id) => document.getElementById(id);
+
+        function escapeHtml(s) {
+          const d = document.createElement("div");
+          d.textContent = s;
+          return d.innerHTML;
+        }
+
+        let inputsFilesState = {{ inputs_files_map | tojson }};
+        let templatesEnabledState = {{ (settings.get("templates_enabled") or {}) | tojson }};
+
+        function isTemplateEnabled(templateMeta) {
+          if (
+            Object.prototype.hasOwnProperty.call(
+              templatesEnabledState,
+              templateMeta.id
+            )
+          ) {
+            return !!templatesEnabledState[templateMeta.id];
+          }
+          return !!templateMeta.enabled;
+        }
+
+        function renderTemplateCards(templateMeta) {
+          if (!templateMeta.length) {
+            return '<p class="muted">No templates match the selected input package yet.</p>';
+          }
+          return templateMeta
+            .map(function (t) {
+              const checked = isTemplateEnabled(t) ? " checked" : "";
+              const open = isTemplateEnabled(t) ? " open" : "";
+              const metaBits = [
+                t.subcategory,
+                t.question_family,
+                t.answer_type,
+              ];
+              if (t.line !== null && t.line !== undefined) metaBits.push("line " + t.line);
+              if (t.stat_column) metaBits.push("stat " + t.stat_column);
+              const explainer = (t.explainer || [])
+                .map(function (line) {
+                  return '<p class="expl">' + escapeHtml(line) + "</p>";
+                })
+                .join("");
+              return (
+                '<details class="tpl-card"' +
+                open +
+                ">" +
+                "<summary>" +
+                '<input type="checkbox" data-tid="' +
+                escapeHtml(t.id) +
+                '"' +
+                checked +
+                ' onclick="event.stopPropagation()" aria-label="Enable ' +
+                escapeHtml(t.id) +
+                '" />' +
+                '<span class="sum-main"><strong>' +
+                escapeHtml(t.id) +
+                '</strong><span class="tpl-meta"> ' +
+                escapeHtml(metaBits.join(" · ")) +
+                "</span></span></summary>" +
+                '<div class="tpl-body"><p class="preview-q">"' +
+                escapeHtml(t.preview_question || "") +
+                '"</p><p class="muted small">Answer options pattern: <code>' +
+                escapeHtml(t.preview_answer_options || "") +
+                "</code></p>" +
+                explainer +
+                "</div></details>"
+              );
+            })
+            .join("");
+        }
+
+        function refreshTemplateSection(templateMeta, templateSubcategory) {
+          const heading = $("template-heading");
+          const subcategoryInput = $("subcategory");
+          const root = $("template-checkboxes");
+          if (heading) {
+            heading.textContent =
+              "Templates (" + (templateSubcategory || "Selected package") + ")";
+          }
+          if (subcategoryInput && templateSubcategory) {
+            subcategoryInput.value = templateSubcategory;
+          }
+          if (root) {
+            root.innerHTML = renderTemplateCards(templateMeta || []);
+          }
+        }
+
+        function gatherInputsFilesFromDom() {
+          const out = {};
+          document.querySelectorAll("#inputs-files-root .pkg-card").forEach(function (card) {
+            const pkgInput = card.querySelector(".pkg-key-inp");
+            const pkg = pkgInput ? pkgInput.value.trim() : "";
+            if (!pkg) return;
+            out[pkg] = out[pkg] || {};
+            card.querySelectorAll(".slot-row").forEach(function (row) {
+              const sidInp = row.querySelector(".slot-id-inp");
+              const fnInp = row.querySelector(".slot-file-inp");
+              const sid = sidInp ? sidInp.value.trim() : "";
+              const fn = fnInp ? fnInp.value.trim() : "";
+              if (sid && fn) out[pkg][sid] = fn;
+            });
+          });
+          return out;
+        }
+
+        function mergeDomIntoInputsState() {
+          const g = gatherInputsFilesFromDom();
+          if (Object.keys(g).length) inputsFilesState = g;
+        }
+
+        function renderInputsFilesEditor() {
+          const root = $("inputs-files-root");
+          if (!root) return;
+          const pkgs = Object.keys(inputsFilesState).sort();
+          if (pkgs.length === 0) {
+            root.innerHTML =
+              '<p class="muted">No packages yet. Click <strong>Add package</strong>, then <strong>Save definitions</strong>.</p>';
+            return;
+          }
+          root.innerHTML = pkgs
+            .map(function (pkg) {
+              const slots = inputsFilesState[pkg] || {};
+              const slotIds = Object.keys(slots).sort();
+              const rows = slotIds
+                .map(function (sid) {
+                  return (
+                    '<div class="slot-row">' +
+                    '<input type="text" class="slot-id-inp" value="' +
+                    escapeHtml(sid) +
+                    '" placeholder="e.g. event_source" />' +
+                    '<input type="text" class="slot-file-inp" value="' +
+                    escapeHtml(slots[sid]) +
+                    '" placeholder="schedule.xlsx" />' +
+                    '<button type="button" class="ghost btn-remove-slot">Remove</button></div>'
+                  );
+                })
+                .join("");
+              return (
+                '<div class="pkg-card">' +
+                '<div class="pkg-head">' +
+                '<label>Package <input type="text" class="pkg-key-inp" value="' +
+                escapeHtml(pkg) +
+                '" placeholder="mlb" /></label>' +
+                '<button type="button" class="ghost btn-remove-pkg">Remove package</button></div>' +
+                rows +
+                '<button type="button" class="ghost btn-add-slot" style="margin-top:0.25rem">Add slot</button>' +
+                "</div>"
+              );
+            })
+            .join("");
+          root.querySelectorAll(".btn-remove-pkg").forEach(function (btn) {
+            btn.addEventListener("click", function () {
+              mergeDomIntoInputsState();
+              const card = btn.closest(".pkg-card");
+              const keyInp = card.querySelector(".pkg-key-inp");
+              const k = keyInp ? keyInp.value.trim() : "";
+              if (k && inputsFilesState[k]) delete inputsFilesState[k];
+              renderInputsFilesEditor();
+            });
+          });
+          root.querySelectorAll(".btn-add-slot").forEach(function (btn) {
+            btn.addEventListener("click", function () {
+              mergeDomIntoInputsState();
+              const card = btn.closest(".pkg-card");
+              const keyInp = card.querySelector(".pkg-key-inp");
+              const k = keyInp ? keyInp.value.trim() : "";
+              if (!k) return;
+              if (!inputsFilesState[k]) inputsFilesState[k] = {};
+              let n = Object.keys(inputsFilesState[k]).length + 1;
+              let sid = "slot_" + n;
+              while (inputsFilesState[k][sid]) {
+                n++;
+                sid = "slot_" + n;
+              }
+              inputsFilesState[k][sid] = "file.xlsx";
+              renderInputsFilesEditor();
+            });
+          });
+          root.querySelectorAll(".btn-remove-slot").forEach(function (btn) {
+            btn.addEventListener("click", function () {
+              mergeDomIntoInputsState();
+              const row = btn.closest(".slot-row");
+              const card = btn.closest(".pkg-card");
+              const keyInp = card.querySelector(".pkg-key-inp");
+              const k = keyInp ? keyInp.value.trim() : "";
+              const sidInp = row.querySelector(".slot-id-inp");
+              const sid = sidInp ? sidInp.value.trim() : "";
+              if (k && inputsFilesState[k] && sid) delete inputsFilesState[k][sid];
+              if (k && inputsFilesState[k] && !Object.keys(inputsFilesState[k]).length) {
+                delete inputsFilesState[k];
+              }
+              renderInputsFilesEditor();
+            });
+          });
+        }
+
+        function refreshInputCategoryDropdown(preferredCat, packageKeys) {
+          const sel = $("input_category_key");
+          if (!sel) return;
+          const keys = packageKeys.slice().sort();
+          sel.innerHTML = keys
+            .map(function (k) {
+              return (
+                '<option value="' +
+                escapeHtml(k) +
+                '">' +
+                escapeHtml(k) +
+                "</option>"
+              );
+            })
+            .join("");
+          if (keys.indexOf(preferredCat) >= 0) sel.value = preferredCat;
+          else if (keys.length) sel.value = keys[0];
+        }
+
+        function setSlotLine(slotId, text, tone) {
+          const line = $("line-" + slotId);
+          if (!line) return;
+          line.textContent = text;
+          line.className = "slot-line " + (tone || "muted");
+        }
+
+        function wireSlot(slotId) {
+          const zone = $("drop-" + slotId);
+          const input = $("file-" + slotId);
+          if (!zone || !input) return;
+          zone.addEventListener("click", () => input.click());
+          zone.addEventListener("keydown", (e) => {
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              input.click();
+            }
+          });
+          ["dragenter", "dragover"].forEach((ev) =>
+            zone.addEventListener(ev, (e) => {
+              e.preventDefault();
+              zone.classList.add("dragover");
+            })
+          );
+          zone.addEventListener("dragleave", () =>
+            zone.classList.remove("dragover")
+          );
+          zone.addEventListener("drop", (e) => {
+            e.preventDefault();
+            zone.classList.remove("dragover");
+            if (e.dataTransfer.files.length) {
+              input.files = e.dataTransfer.files;
+              input.dispatchEvent(new Event("change", { bubbles: true }));
+            }
+          });
+          input.addEventListener("change", () => {
+            zone.classList.remove("saved");
+            const f = input.files[0];
+            if (f) {
+              zone.classList.add("has-file");
+              setSlotLine(
+                slotId,
+                "Selected: " + f.name + " (not saved yet)",
+                "muted"
+              );
+            } else {
+              zone.classList.remove("has-file");
+              setSlotLine(slotId, "", "muted");
+            }
+          });
+        }
+
+        function wireAllSlots() {
+          document.querySelectorAll(".slot-file").forEach((inp) => {
+            wireSlot(inp.dataset.slotId);
+          });
+        }
+        wireAllSlots();
+
+        renderInputsFilesEditor();
+        $("template-checkboxes").addEventListener("change", function (e) {
+          if (
+            e.target &&
+            e.target.matches &&
+            e.target.matches('input[type="checkbox"][data-tid]')
+          ) {
+            templatesEnabledState[e.target.dataset.tid] = e.target.checked;
+          }
+        });
+
+        $("btn-add-input-pkg").addEventListener("click", function () {
+          mergeDomIntoInputsState();
+          let i = 1;
+          let name = "package";
+          while (inputsFilesState[name]) {
+            name = "package_" + i;
+            i++;
+          }
+          inputsFilesState[name] = { slot_1: "file.xlsx" };
+          renderInputsFilesEditor();
+        });
+
+        $("btn-save-inputs-files").addEventListener("click", async function () {
+          mergeDomIntoInputsState();
+          const msg = $("inputs-files-msg");
+          msg.textContent = "Saving…";
+          try {
+            const r = await fetch("/api/inputs-files", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ files: inputsFilesState }),
+            });
+            const j = await r.json();
+            if (!r.ok) {
+              msg.textContent = j.error || "Save failed";
+              return;
+            }
+            inputsFilesState = j.files || inputsFilesState;
+            msg.textContent = "Saved.";
+            refreshInputCategoryDropdown(
+              j.category_key,
+              Object.keys(j.files || {})
+            );
+            $("input_category_key").dispatchEvent(new Event("change"));
+          } catch (e) {
+            msg.textContent = String(e);
+          }
+        });
+
+        $("input_category_key").addEventListener("change", async () => {
+          const cat = $("input_category_key").value;
+          $("upload-msg").textContent = "";
+          const root = $("input-slots-root");
+          root.innerHTML = "<p class=\"muted\">Loading…</p>";
+          try {
+            const r = await fetch(
+              "/api/input-slots?category=" + encodeURIComponent(cat)
+            );
+            const j = await r.json();
+            if (!r.ok) {
+              root.innerHTML =
+                "<p class=\"muted\">" +
+                escapeHtml(j.error || "Could not load slots") +
+                "</p>";
+              return;
+            }
+            root.innerHTML = j.slots
+              .map(function (s) {
+                return (
+                  '<div class="input-slot-wrap" data-slot-id="' +
+                  escapeHtml(s.slot_id) +
+                  '">' +
+                  '<div class="drop" id="drop-' +
+                  escapeHtml(s.slot_id) +
+                  '" data-input="file-' +
+                  escapeHtml(s.slot_id) +
+                  '" tabindex="0">' +
+                  "<strong>" +
+                  escapeHtml(s.label) +
+                  "</strong> — drop <code>.xlsx</code> here or click" +
+                  '<div class="target-name muted">Saved as <code>' +
+                  escapeHtml(s.target_filename) +
+                  "</code></div></div>" +
+                  '<input type="file" id="file-' +
+                  escapeHtml(s.slot_id) +
+                  '" class="slot-file" data-slot-id="' +
+                  escapeHtml(s.slot_id) +
+                  '" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" />' +
+                  '<div class="slot-line muted" id="line-' +
+                  escapeHtml(s.slot_id) +
+                  '"></div></div>'
+                );
+              })
+              .join("");
+            j.slots.forEach(function (s) {
+              wireSlot(s.slot_id);
+            });
+            refreshTemplateSection(
+              j.template_meta || [],
+              j.template_subcategory || cat
+            );
+          } catch (e) {
+            root.innerHTML =
+              '<p class="muted">' + escapeHtml(String(e)) + "</p>";
+          }
+        });
+
+        $("btn-upload").addEventListener("click", async () => {
+          const fd = new FormData();
+          fd.append("category_key", $("input_category_key").value);
+          let n = 0;
+          document.querySelectorAll(".slot-file").forEach((inp) => {
+            const f = inp.files[0];
+            if (f) {
+              fd.append(inp.dataset.slotId, f);
+              n++;
+            }
+          });
+          if (n === 0) {
+            $("upload-msg").textContent = "Choose at least one file.";
+            return;
+          }
+          $("upload-msg").textContent = "Uploading…";
+          const r = await fetch("/upload", { method: "POST", body: fd });
+          const j = await r.json();
+          if (!r.ok) {
+            $("upload-msg").textContent = j.error || "Upload failed";
+            return;
+          }
+          const names = (j.saved || []).map(function (x) {
+            return x.filename;
+          });
+          $("upload-msg").textContent =
+            "Saved " + names.length + " file(s): " + names.join(", ");
+          (j.saved || []).forEach(function (item) {
+            const z = $("drop-" + item.slot_id);
+            if (z) {
+              z.classList.add("saved");
+              z.classList.add("has-file");
+              setSlotLine(
+                item.slot_id,
+                "Saved as " + item.filename,
+                "muted"
+              );
+            }
+          });
+        });
+
+        function maxGeneratedQuestionsPayload() {
+          const raw = $("max_q").value.trim();
+          if (raw === "") return null;
+          const n = parseInt(raw, 10);
+          if (!Number.isFinite(n) || n < 1) return null;
+          return n;
+        }
+
+        function collectPayload() {
+          mergeDomIntoInputsState();
+          return {
+            category_id: $("category_id").value.trim(),
+            subcategory: $("subcategory").value.trim() || "MLB",
+            top_n_per_team: parseInt($("top_n").value, 10) || 3,
+            date_start: $("date_start").value.trim(),
+            date_end: $("date_end").value.trim(),
+            templates_enabled: templatesEnabledState,
+            input_category_key: $("input_category_key").value.trim() || "mlb",
+            max_generated_questions: maxGeneratedQuestionsPayload(),
+            _inputs_files: inputsFilesState,
+          };
+        }
+
+        const tplZone = $("tpl-upload-zone");
+        const tplFiles = $("tpl-files");
+        tplZone.addEventListener("click", () => tplFiles.click());
+        tplZone.addEventListener("keydown", (e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            tplFiles.click();
+          }
+        });
+        ["dragenter", "dragover"].forEach((ev) =>
+          tplZone.addEventListener(ev, (e) => {
+            e.preventDefault();
+            tplZone.style.background = "#eef3fb";
+          })
+        );
+        tplZone.addEventListener("dragleave", () => {
+          tplZone.style.background = "";
+        });
+        tplZone.addEventListener("drop", (e) => {
+          e.preventDefault();
+          tplZone.style.background = "";
+          if (e.dataTransfer.files.length) tplFiles.files = e.dataTransfer.files;
+        });
+
+        $("btn-tpl-upload").addEventListener("click", async () => {
+          const msg = $("tpl-upload-msg");
+          if (!tplFiles.files.length) {
+            msg.textContent = "Choose one or more .csv or .json files.";
+            return;
+          }
+          const fd = new FormData();
+          for (let i = 0; i < tplFiles.files.length; i++) {
+            fd.append("files", tplFiles.files[i]);
+          }
+          msg.textContent = "Uploading…";
+          try {
+            const r = await fetch("/upload/templates", { method: "POST", body: fd });
+            const j = await r.json();
+            if (!r.ok) {
+              msg.textContent = j.error || "Upload failed";
+              return;
+            }
+            const errTxt = (j.errors || [])
+              .map(function (e) {
+                return e.filename + ": " + e.error;
+              })
+              .join("; ");
+            if (j.saved && j.saved.length) {
+              msg.textContent =
+                "Saved " +
+                j.saved.map(function (x) {
+                  return x.id;
+                }).join(", ") +
+                (errTxt ? " — errors: " + errTxt : "") +
+                ". Reloading…";
+              setTimeout(function () {
+                location.reload();
+              }, 600);
+            } else {
+              msg.textContent = errTxt || "Nothing saved.";
+            }
+          } catch (e) {
+            msg.textContent = String(e);
+          }
+        });
+
+        $("btn-run").addEventListener("click", async () => {
+          const btn = $("btn-run");
+          const status = $("status-line");
+          const summary = $("summary");
+          const downloads = $("downloads");
+          summary.hidden = true;
+          downloads.innerHTML = "";
+          status.className = "status";
+          status.textContent = "";
+          $("run-hint").textContent = "";
+
+          btn.disabled = true;
+          try {
+            const r = await fetch("/run", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(collectPayload()),
+            });
+            const j = await r.json();
+            if (r.status === 409) {
+              status.className = "status error";
+              status.textContent = j.error || "A job is already running.";
+              return;
+            }
+            if (!r.ok) {
+              status.className = "status error";
+              status.textContent = j.error || "Failed to start.";
+              return;
+            }
+            const jobId = j.job_id;
+            $("run-hint").textContent = "Job " + jobId.slice(0, 8) + "…";
+
+            poll: while (true) {
+              await new Promise((x) => setTimeout(x, 1000));
+              const sr = await fetch("/run/status/" + jobId);
+              const sj = await sr.json();
+              if (!sr.ok) {
+                status.className = "status error";
+                status.textContent = sj.error || "Status poll failed";
+                break poll;
+              }
+              status.textContent =
+                sj.phase +
+                (sj.total_steps
+                  ? " (" + sj.current_step + "/" + sj.total_steps + ")"
+                  : "");
+              if (sj.state === "succeeded" || sj.state === "failed") {
+                if (sj.error && sj.state === "failed") {
+                  status.className = "status error";
+                  status.textContent = sj.error;
+                } else {
+                  status.className = "status ok";
+                  status.textContent = sj.phase || "Done";
+                }
+                if (sj.qa_summary) {
+                  const q = sj.qa_summary;
+                  summary.hidden = false;
+                  summary.textContent =
+                    "Total rows: " +
+                    q.total_rows_generated +
+                    "\nPassed validation: " +
+                    q.rows_passed_validation +
+                    "\nErrors CSV rows: " +
+                    q.rows_failed_validation +
+                    "\nNear-duplicate flagged: " +
+                    q.rows_flagged_near_duplicate +
+                    "\nExact duplicates removed: " +
+                    q.exact_duplicates_removed +
+                    "\nEst. cost: " +
+                    (q.has_cost
+                      ? "$" + Number(q.estimated_cost_usd).toFixed(4) + " USD"
+                      : "N/A");
+                }
+                downloads.innerHTML = "";
+                if (sj.output_csv) {
+                  const a = document.createElement("a");
+                  a.href = "/download/" + encodeURIComponent(sj.output_csv);
+                  a.textContent = "Download " + sj.output_csv;
+                  a.download = sj.output_csv;
+                  downloads.appendChild(a);
+                }
+                if (sj.errors_csv && (sj.rows_failed_validation || 0) > 0) {
+                  const a = document.createElement("a");
+                  a.href = "/download/" + encodeURIComponent(sj.errors_csv);
+                  a.textContent = "Download " + sj.errors_csv;
+                  a.download = sj.errors_csv;
+                  downloads.appendChild(a);
+                }
+                if (sj.flagged_csv) {
+                  const a = document.createElement("a");
+                  a.href = "/download/" + encodeURIComponent(sj.flagged_csv);
+                  a.textContent = "Download " + sj.flagged_csv;
+                  downloads.appendChild(a);
+                }
+                break poll;
+              }
+            }
+          } catch (e) {
+            status.className = "status error";
+            status.textContent = String(e);
+          } finally {
+            btn.disabled = false;
+          }
+        });
+      })();
+    </script>
   </body>
 </html>

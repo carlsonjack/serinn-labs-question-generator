@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Callable
 
 from openai import OpenAI
 
@@ -114,17 +114,26 @@ class BatchExecutor:
 
     # -- public API --------------------------------------------------------
 
-    def execute(self, items: list[PromptItem]) -> BatchResult:
+    def execute(
+        self,
+        items: list[PromptItem],
+        *,
+        on_batch_done: Callable[[int, int], None] | None = None,
+    ) -> BatchResult:
         """Run generation across all items, batched by ``self.batch_size``.
 
         Returns a :class:`BatchResult` that contains every successfully
         generated question **and** metadata for any batches that failed.
+
+        If *on_batch_done* is set, it is invoked as ``on_batch_done(index, total)``
+        after each batch attempt (1-based *index*, *total* batch count).
         """
         if not items:
             return BatchResult()
 
         batches = self._chunk(items)
         result = BatchResult(total_batches=len(batches))
+        total = len(batches)
 
         for idx, batch in enumerate(batches):
             try:
@@ -152,6 +161,8 @@ class BatchExecutor:
                     len(batch),
                     exc,
                 )
+            if on_batch_done is not None:
+                on_batch_done(idx + 1, total)
 
         result.cost_summary = build_cost_summary(
             result.token_usages, self.model, self.settings

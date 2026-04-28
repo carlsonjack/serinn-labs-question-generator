@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from core.csv_export import CSV_WRITE_ENCODING
 from core.dedup import (
     DEFAULT_SIMILARITY_THRESHOLD,
     DeduplicationResult,
@@ -367,7 +368,7 @@ class TestWriteFlaggedCsv:
         out = tmp_path / "flagged.csv"
         write_flagged_csv([row], [pair], output_path=out)
 
-        with out.open(encoding="utf-8") as fh:
+        with out.open(encoding=CSV_WRITE_ENCODING) as fh:
             reader = csv.DictReader(fh)
             assert reader.fieldnames == OUTPUT_COLUMNS + ["similarity", "reason"]
 
@@ -379,7 +380,7 @@ class TestWriteFlaggedCsv:
         out = tmp_path / "flagged.csv"
         write_flagged_csv(rows, [pair], output_path=out)
 
-        with out.open(encoding="utf-8") as fh:
+        with out.open(encoding=CSV_WRITE_ENCODING) as fh:
             data = list(csv.DictReader(fh))
         assert len(data) == 3
 
@@ -392,7 +393,7 @@ class TestWriteFlaggedCsv:
         out = tmp_path / "flagged.csv"
         write_flagged_csv([row_a, row_b], [pair], output_path=out)
 
-        with out.open(encoding="utf-8") as fh:
+        with out.open(encoding=CSV_WRITE_ENCODING) as fh:
             data = list(csv.DictReader(fh))
         assert data[0]["similarity"] == "0.91"
         assert data[0]["reason"] == "test reason"
@@ -401,7 +402,7 @@ class TestWriteFlaggedCsv:
         out = tmp_path / "flagged.csv"
         write_flagged_csv([], [], output_path=out)
 
-        with out.open(encoding="utf-8") as fh:
+        with out.open(encoding=CSV_WRITE_ENCODING) as fh:
             reader = csv.DictReader(fh)
             assert reader.fieldnames == OUTPUT_COLUMNS + ["similarity", "reason"]
             assert list(reader) == []
