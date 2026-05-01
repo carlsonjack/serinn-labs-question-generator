@@ -10,7 +10,8 @@ import logging
 from dataclasses import asdict, dataclass
 from typing import Any
 
-from core.date_rules import QuestionDates, compute_question_dates
+from core.date_rules import compute_question_dates
+from core.input_slots import get_inputs_category_key
 from core.parsers.contracts import NormalizedEvent
 from core.template_config.schema import QuestionTemplate
 
@@ -54,7 +55,14 @@ class OutputRow:
 
 
 def build_event_string(event: NormalizedEvent) -> str:
-    """Construct the human-readable event string (e.g. ``'Mets vs Yankees'``)."""
+    """Construct the human-readable event string (e.g. ``'Mets vs Yankees'``).
+
+    When ``event_display`` is set, use it (calendar-style labels); otherwise use
+    the head-to-head ``away vs home`` pattern.
+    """
+
+    if event.event_display and str(event.event_display).strip():
+        return str(event.event_display).strip()
     return f"{event.away_team} vs {event.home_team}"
 
 
@@ -72,6 +80,15 @@ class RowAssembler:
         self.settings = settings
         self.category_id: str = str(settings.get("category_id", ""))
 
+    def _resolved_category_id(self) -> str:
+        pkg = get_inputs_category_key(self.settings).strip().lower()
+        cats = self.settings.get("category_ids")
+        if isinstance(cats, dict):
+            hit = cats.get(pkg)
+            if hit is not None and str(hit).strip():
+                return str(hit).strip()
+        return str(self.settings.get("category_id", ""))
+
     def assemble(
         self,
         generated: GeneratedQuestion,
@@ -88,7 +105,7 @@ class RowAssembler:
         )
 
         return OutputRow(
-            category_id=self.category_id,
+            category_id=self._resolved_category_id(),
             subcategory=template.subcategory,
             event=build_event_string(event),
             question=generated.question,

@@ -4,6 +4,7 @@ from pathlib import Path
 import shutil
 
 import pandas as pd
+import pytest
 
 from core.config import load_settings
 from core.parsers.contracts import SourceRole, ValidationSeverity
@@ -16,8 +17,23 @@ from core.parsers.service import load_normalized_bundle
 
 ROOT = Path(__file__).resolve().parent.parent
 INPUTS = ROOT / "inputs"
+_SCHEDULE_XLSX = INPUTS / "schedule.xlsx"
+_STATS_XLSX = INPUTS / "stats.xlsx"
+
+needs_local_inputs = pytest.mark.needs_local_inputs
+
+needs_inputs_schedule = pytest.mark.skipif(
+    not _SCHEDULE_XLSX.is_file(),
+    reason="Missing inputs/schedule.xlsx (add MLB fixtures locally).",
+)
+needs_inputs_stats = pytest.mark.skipif(
+    not _STATS_XLSX.is_file(),
+    reason="Missing inputs/stats.xlsx (add MLB fixtures locally).",
+)
 
 
+@needs_local_inputs
+@needs_inputs_schedule
 def test_schedule_parser_normalizes_events() -> None:
     settings = load_settings()
     result = MlbScheduleParser(settings).load(INPUTS / "schedule.xlsx").normalize()
@@ -30,6 +46,8 @@ def test_schedule_parser_normalizes_events() -> None:
     assert result.data[0].away_team == "Giants"
 
 
+@needs_local_inputs
+@needs_inputs_stats
 def test_stats_parser_handles_malformed_workbook_and_ranks_players() -> None:
     parser = MlbStatsParser().load(INPUTS / "stats.xlsx")
     result = parser.normalize()
@@ -44,6 +62,8 @@ def test_stats_parser_handles_malformed_workbook_and_ranks_players() -> None:
     assert result.data[0].source_sheet == "2025 MLB Statistics -> 2026 MLB Statistics"
 
 
+@needs_local_inputs
+@needs_inputs_schedule
 def test_saved_profile_is_reused_for_repeat_detection(
     tmp_path: Path, monkeypatch
 ) -> None:
@@ -82,6 +102,9 @@ def test_schedule_parser_reports_missing_required_columns(tmp_path: Path) -> Non
     }
 
 
+@needs_local_inputs
+@needs_inputs_schedule
+@needs_inputs_stats
 def test_load_normalized_bundle_persists_profiles_and_has_no_issues(
     tmp_path: Path, monkeypatch
 ) -> None:
@@ -211,6 +234,8 @@ def test_single_sheet_metric_workbook_still_parses_without_merge(tmp_path: Path)
     assert parsed.data[0].source_sheet == "2026 MLB Statistics"
 
 
+@needs_local_inputs
+@needs_inputs_schedule
 def test_load_normalized_bundle_persists_merge_heuristics_in_metric_profile(
     tmp_path: Path, monkeypatch
 ) -> None:

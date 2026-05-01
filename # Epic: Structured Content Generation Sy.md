@@ -89,7 +89,7 @@ INPUT FILES                CONFIG
 | Epic | Topic | Status | Notes |
 |------|-------|--------|-------|
 | 1 | Project Setup and Environment | **Complete** | `requirements.txt`, `config/settings.yaml`, `main.py`, Flask UI (`ui/`), README setup, `.env.example`; `core/config.py` loads YAML + optional `settings.local.yaml` + `OPENAI_API_KEY` |
-| 2 | Input Parser Layer | Not started | |
+| 2 | Input Parser Layer | **In progress** | Multi-vertical inputs: `inputs.files` + `inputs.file_roles`; `load_normalized_bundle` + registry (`mlb`, `f1`); `NormalizedEvent.event_display`; profiles under `config/input_profiles/`; see README *Multi-vertical inputs* |
 | 3 | Template and Config System | **Complete** | `templates/*.json` (6 MLB + 3 stubs); `core/template_config/` schema + loader; `templates_directory` in `config/settings.yaml`; `tests/test_templates.py` |
 | 4 | Date Logic Layer | **Complete** | `core/date_rules.py` (engine); `config/settings.yaml` `date_rules` section (configurable offsets); `tests/test_date_rules.py` (6 passing tests); exported via `core/__init__.py` |
 | 5 | Controlled Generation Layer | **In progress** | Tasks 5.1, 5.2, 5.3 complete |
@@ -98,7 +98,15 @@ INPUT FILES                CONFIG
 | 8 | Local Web UI | Not started | |
 | 9 | Documentation and Handoff | Not started | |
 
-**Last updated:** 2026-04-17 (EPIC 7 complete)
+**Last updated:** 2026-04-28 (multi-vertical parser scaffolding + F1 normalizer)
+
+### Adding a new vertical (checklist)
+
+1. Register a `CategoryNormalizer` in `core/parsers/<vertical>/` and `@register_category_normalizer("<lowercase_key>")`.
+2. Add `inputs.files.<Package>` slots and `inputs.file_roles.<Package>` unless using the MLB legacy `event_source` / `metric_source` pair.
+3. Commit or generate `config/input_profiles/` YAML for detector mappings (`category_key` matches registry key; fingerprint may be `null` during bring-up).
+4. Add templates under `templates/` with `subcategory` matching the UI package label.
+5. Optionally set `category_ids.<package>` and `inputs.packages.<vertical>` options (see `inputs.packages.f1`).
 
 ---
 

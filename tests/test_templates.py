@@ -30,6 +30,13 @@ def test_load_all_shipped_templates() -> None:
         "markets_placeholder",
         "news_placeholder",
         "entertainment_placeholder",
+        "sample_csv_event_yesno",
+        "sample_csv_event_mc",
+        "sample_csv_entity_hr",
+        "f1_race_winner_head_to_head",
+        "f1_race_winner_flag",
+        "f1_race_winner_yes_no",
+        "f1_race_finish_ahead_yes_no",
     }
     assert templates["mlb_game_winner"].question_family == "event"
     assert templates["mlb_game_winner"].answer_type == "multiple_choice"

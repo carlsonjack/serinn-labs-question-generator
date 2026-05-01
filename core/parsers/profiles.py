@@ -66,7 +66,7 @@ def load_profiles(category_key: str | None = None) -> list[InputProfile]:
         with path.open(encoding="utf-8") as handle:
             raw = yaml.safe_load(handle) or {}
         profile = InputProfile.from_dict(raw)
-        if category_key and profile.category_key != category_key:
+        if category_key and profile.category_key.lower() != category_key.lower():
             continue
         profiles.append(profile)
     return profiles

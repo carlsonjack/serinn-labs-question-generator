@@ -101,6 +101,7 @@ class NormalizedEvent:
     away_team: str
     event_datetime: str
     subcategory: str
+    event_display: str | None = None
 
 
 @dataclass

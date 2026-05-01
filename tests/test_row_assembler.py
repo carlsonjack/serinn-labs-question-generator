@@ -126,6 +126,17 @@ class TestBuildEventString:
     def test_different_teams(self):
         assert build_event_string(EVENT_B) == "Mets vs Yankees"
 
+    def test_event_display_overrides(self):
+        ev = NormalizedEvent(
+            event_id="x",
+            home_team="H",
+            away_team="A",
+            event_datetime="2026-03-08T14:00:00",
+            subcategory="F1",
+            event_display="Australian Grand Prix - Race",
+        )
+        assert build_event_string(ev) == "Australian Grand Prix - Race"
+
 
 # ---------------------------------------------------------------------------
 # TestOutputRow
@@ -202,6 +213,19 @@ class TestRowAssemblerSingle:
     def test_category_id_from_settings(self):
         row = self.assembler.assemble(_gen_q(), _item())
         assert row.category_id == "CAT-001"
+
+    def test_category_ids_override_per_package(self):
+        settings = {
+            **SETTINGS,
+            "inputs": {
+                "category_key": "f1",
+                "files": {"f1": {"schedule": "x.xlsx"}},
+            },
+            "category_ids": {"f1": "f1_race_winner"},
+        }
+        assembler = RowAssembler(settings)
+        row = assembler.assemble(_gen_q(), _item())
+        assert row.category_id == "f1_race_winner"
 
     def test_category_id_empty_when_missing(self):
         assembler = RowAssembler({})

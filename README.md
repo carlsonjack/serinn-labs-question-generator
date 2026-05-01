@@ -79,6 +79,26 @@ python main.py
 
 Open the URL printed in the terminal (default [http://127.0.0.1:5000/](http://127.0.0.1:5000/)). Optional environment variables: `HOST`, `PORT`, `FLASK_DEBUG` (see `.env.example`).
 
+## Multi-vertical inputs (MLB + other sports)
+
+- **MLB (legacy):** Under `inputs.files.mlb`, keep `event_source` and `metric_source` filenames (e.g. `schedule.xlsx`, `stats.xlsx`). Set `inputs.category_key` to `mlb`. No change from the original workflow.
+- **Additional packages (e.g. F1):** Add a block under `inputs.files` (e.g. `F1`) with arbitrary slot ids (`schedule`, …), then map each slot to a `SourceRole` in `inputs.file_roles` (e.g. `event_source`). Schedule-only packages omit metric slots.
+- **Templates:** Each JSON template’s `subcategory` must match the selected input package when normalized (case-insensitive), e.g. `F1` templates with package `F1`.
+- **Export `category_id`:** Optional map `category_ids` in `config/settings.yaml` (`mlb`, `f1`, …) keyed by lowercase package id; falls back to top-level `category_id`.
+- **Calendar-style event labels:** Normalizers may set `event_display` on `NormalizedEvent`; the CSV `event` column uses it when present (otherwise `Away vs Home`).
+
+See [`config/settings.yaml`](config/settings.yaml) for a commented example with both `mlb` and `F1`.
+
+## Testing
+
+| Command | Purpose |
+|--------|---------|
+| `pytest` | Full suite (fast path skips optional MLB files under `inputs/` when missing). |
+| `pytest -m integration` | Parser registry + F1 bundle integration tests (`tests/integration/`). |
+| `pytest -m "not needs_local_inputs"` | CI-style run excluding tests that expect `inputs/schedule.xlsx` + `stats.xlsx`. |
+
+Factories for `.xlsx` files live in [`tests/fixtures/workbooks.py`](tests/fixtures/workbooks.py). Add new vertical checks beside [`tests/integration/test_f1_bundle_load.py`](tests/integration/test_f1_bundle_load.py).
+
 ## Status
 
 Repository initialized; implementation follows the Epic (EPIC 1+).
