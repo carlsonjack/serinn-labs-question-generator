@@ -5,7 +5,7 @@
   "question": "Placeholder question for future entertainment category.",
   "answer_type": "yes_no",
   "answer_options": "Yes||No",
-  "priority": "false",
+  "priority": "",
   "requires_entities": false,
   "_comment": "extend by adding question and input package definition"
 }

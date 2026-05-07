@@ -10,6 +10,7 @@ from core.input_slots import (
     iter_input_slots,
     list_input_categories,
     normalize_inputs_files,
+    resolve_inputs_package_file_key,
 )
 
 
@@ -55,6 +56,21 @@ def test_get_files_map():
 def test_list_input_categories():
     s = {"inputs": {"files": {"mlb": {}, "markets": {}}}}
     assert list_input_categories(s) == ["markets", "mlb"]
+
+
+def test_resolve_inputs_package_file_key_exact_and_case_insensitive():
+    s = {
+        "inputs": {
+            "files": {
+                "MLS": {"event_source": "schedule.xlsx"},
+                "mlb": {"event_source": "a.xlsx"},
+            }
+        }
+    }
+    assert resolve_inputs_package_file_key(s, "MLS") == "MLS"
+    assert resolve_inputs_package_file_key(s, "mls") == "MLS"
+    assert resolve_inputs_package_file_key(s, "mlb") == "mlb"
+    assert resolve_inputs_package_file_key(s, "nope") is None
 
 
 def test_normalize_inputs_files_ok():

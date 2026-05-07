@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-import shutil
 
 import pandas as pd
 import pytest
@@ -14,6 +13,7 @@ from core.parsers.mlb.stats import MlbStatsParser
 from core.parsers.profiles import load_profiles, save_profile
 from core.parsers.season_merge import merge_metric_detection
 from core.parsers.service import load_normalized_bundle
+from tests.fixtures.workbooks import write_mlb_schedule_minimal, write_mlb_stats_minimal
 
 ROOT = Path(__file__).resolve().parent.parent
 INPUTS = ROOT / "inputs"
@@ -32,45 +32,38 @@ needs_inputs_stats = pytest.mark.skipif(
 )
 
 
-@needs_local_inputs
-@needs_inputs_schedule
-def test_schedule_parser_normalizes_events() -> None:
+def test_schedule_parser_normalizes_events(tmp_path: Path) -> None:
+    schedule = write_mlb_schedule_minimal(tmp_path / "schedule.xlsx")
     settings = load_settings()
-    result = MlbScheduleParser(settings).load(INPUTS / "schedule.xlsx").normalize()
+    result = MlbScheduleParser(settings).load(schedule).normalize()
 
     assert not result.errors
     assert result.data
-    assert result.data[0].event_id == "MLB000657"
+    assert result.data[0].event_id == "MLBTEST001"
     assert result.data[0].event_datetime == "2026-05-15T21:40:00"
     assert result.data[0].home_team == "Athletics"
     assert result.data[0].away_team == "Giants"
 
 
-@needs_local_inputs
-@needs_inputs_stats
-def test_stats_parser_handles_malformed_workbook_and_ranks_players() -> None:
-    parser = MlbStatsParser().load(INPUTS / "stats.xlsx")
+def test_stats_parser_ranks_players_from_generated_workbook(tmp_path: Path) -> None:
+    stats = write_mlb_stats_minimal(tmp_path / "stats.xlsx")
+    parser = MlbStatsParser().load(stats)
     result = parser.normalize()
 
     assert not result.errors
     assert result.data
-    assert [player.player_name for player in parser.get_top_players("Athletics", "HR", 3)] == [
-        "Nick Kurtz*",
-        "Shea Langeliers",
-        "Brent Rooker",
-    ]
-    assert result.data[0].source_sheet == "2025 MLB Statistics -> 2026 MLB Statistics"
+    assert [player.player_name for player in parser.get_top_players("Athletics", "HR", 3)] == ["Athletics Slugger"]
+    assert result.data[0].source_sheet == "2026 MLB Statistics"
 
 
-@needs_local_inputs
-@needs_inputs_schedule
 def test_saved_profile_is_reused_for_repeat_detection(
     tmp_path: Path, monkeypatch
 ) -> None:
     monkeypatch.setattr("core.parsers.profiles._PROFILE_DIR", tmp_path / "profiles")
+    schedule = write_mlb_schedule_minimal(tmp_path / "schedule.xlsx")
 
     first_detection = inspect_file(
-        INPUTS / "schedule.xlsx",
+        schedule,
         category_key="mlb",
         preferred_role=SourceRole.EVENT_SOURCE,
     )
@@ -79,7 +72,7 @@ def test_saved_profile_is_reused_for_repeat_detection(
     save_profile(profile)
 
     second_detection = inspect_file(
-        INPUTS / "schedule.xlsx",
+        schedule,
         category_key="mlb",
         preferred_role=SourceRole.EVENT_SOURCE,
     )
@@ -102,15 +95,14 @@ def test_schedule_parser_reports_missing_required_columns(tmp_path: Path) -> Non
     }
 
 
-@needs_local_inputs
-@needs_inputs_schedule
-@needs_inputs_stats
 def test_load_normalized_bundle_persists_profiles_and_has_no_issues(
     tmp_path: Path, monkeypatch
 ) -> None:
     monkeypatch.setattr("core.parsers.profiles._PROFILE_DIR", tmp_path / "profiles")
+    write_mlb_schedule_minimal(tmp_path / "schedule.xlsx")
+    write_mlb_stats_minimal(tmp_path / "stats.xlsx")
     settings = load_settings()
-    settings["inputs"]["directory"] = str(INPUTS)
+    settings["inputs"]["directory"] = str(tmp_path)
 
     bundle = load_normalized_bundle(settings)
 
@@ -234,13 +226,11 @@ def test_single_sheet_metric_workbook_still_parses_without_merge(tmp_path: Path)
     assert parsed.data[0].source_sheet == "2026 MLB Statistics"
 
 
-@needs_local_inputs
-@needs_inputs_schedule
 def test_load_normalized_bundle_persists_merge_heuristics_in_metric_profile(
     tmp_path: Path, monkeypatch
 ) -> None:
     monkeypatch.setattr("core.parsers.profiles._PROFILE_DIR", tmp_path / "profiles")
-    shutil.copyfile(INPUTS / "schedule.xlsx", tmp_path / "schedule.xlsx")
+    write_mlb_schedule_minimal(tmp_path / "schedule.xlsx")
     _write_stats_workbook(
         tmp_path / "stats.xlsx",
         stats_rows=[
@@ -296,4 +286,22 @@ def _write_stats_workbook(
         stats_frame.to_excel(writer, index=False, sheet_name="2025 MLB Statistics")
         association_frame.to_excel(writer, index=False, sheet_name="2026 MLB Statistics")
     return path
+
+
+def test_unknown_source_role_skipped_when_slot_role_explicit(tmp_path: Path) -> None:
+    """Package slot roles override heuristic UNKNOWN column inference."""
+    path = tmp_path / "opaque_columns.xlsx"
+    pd.DataFrame([{"FooCol": "x", "BarCol": 1}]).to_excel(path, index=False)
+
+    hinted = inspect_file(
+        path,
+        category_key="world_cup",
+        preferred_role=SourceRole.EVENT_SOURCE,
+    )
+    codes_hinted = {i.code for i in hinted.issues}
+    assert "unknown_source_role" not in codes_hinted
+
+    unhinted = inspect_file(path, category_key="world_cup")
+    codes_unhinted = {i.code for i in unhinted.issues}
+    assert "unknown_source_role" in codes_unhinted
 

@@ -1,10 +1,10 @@
 openai_api_key: ''
 model: gpt-5.4
-category_id: mlb_game_winner
-category_ids:
-  mlb: mlb_game_winner
-  f1: f1_race_winner
-subcategory: MLB
+topic_import_id: world-cup
+topic_import_ids:
+  mlb: mlb-regular-season
+  f1: f1-race-winner
+subcategory: World Cup
 top_n_per_team: 3
 templates_directory: templates
 templates_enabled:
@@ -24,9 +24,14 @@ templates_enabled:
   f1_race_winner_flag: true
   f1_race_winner_yes_no: true
   f1_race_finish_ahead_yes_no: true
+  mls_sample_event_yesno: false
+  mls_sample_event_mc: true
+  mls_sample_entity_goals: true
+  world_cup_event_winner_mc: true
+  world_cup_entity_goal_prob: true
 date_filter:
-  start: '2026-01-01'
-  end: '2026-12-31'
+  start: '2026-06-11'
+  end: '2026-06-26'
 date_rules:
   default:
     start_offset_hours: -24
@@ -41,7 +46,7 @@ date_rules:
     expiration_offset_hours: 0
     resolution_offset_hours: 4
 batch_size: 100
-max_generated_questions: 1774
+max_generated_questions: 5
 model_pricing:
   gpt-4o:
     input: 2.5
@@ -54,20 +59,26 @@ model_pricing:
     output: 10.0
 inputs:
   directory: inputs
-  category_key: mlb
+  category_key: mls
   files:
+    F1:
+      schedule: f1_schedule.xlsx
     mlb:
       event_source: schedule.xlsx
       metric_source: stats.xlsx
-    F1:
-      schedule: f1_schedule.xlsx
+    mls:
+      event_source: schedule.xlsx
+      metric_source: stats.xlsx
+    world_cup:
+      event_source: schedule.xlsx
+      metric_source: stats.xlsx
   file_roles:
     F1:
       schedule: event_source
   packages:
     f1:
       race_session_values:
-        - Race
+      - Race
       placeholder_home_team: Driver_A
       placeholder_away_team: Driver_B
 parsing:

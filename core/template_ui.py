@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from typing import Any
 
 from core.template_config.schema import QuestionTemplate
@@ -17,32 +17,79 @@ def normalize_template_package(value: str) -> str:
     return _PACKAGE_TOKEN_RE.sub("", (value or "").strip().lower())
 
 
-def template_matches_package(template: QuestionTemplate, package_key: str) -> bool:
+def package_aliases_for_settings(
+    settings: Mapping[str, Any],
+    package_key: str,
+) -> list[str]:
+    """Return template labels that should match ``package_key``.
+
+    ``inputs.package_aliases`` accepts either a single string or a list of strings:
+
+    ``{"formula_one": "F1"}`` or ``{"formula_one": ["F1", "Formula 1"]}``.
+    """
+
+    aliases_root = ((settings.get("inputs") or {}).get("package_aliases")) or {}
+    if not isinstance(aliases_root, Mapping):
+        return []
+    direct = aliases_root.get(package_key)
+    if direct is None:
+        pkg_norm = normalize_template_package(package_key)
+        for raw_key, raw_value in aliases_root.items():
+            if normalize_template_package(str(raw_key)) == pkg_norm:
+                direct = raw_value
+                break
+    if direct is None:
+        return []
+    if isinstance(direct, str):
+        return [direct]
+    if isinstance(direct, Iterable):
+        return [str(item) for item in direct if str(item).strip()]
+    return []
+
+
+def _package_match_labels(package_key: str, aliases: Iterable[str] | None) -> set[str]:
+    return {
+        normalize_template_package(value)
+        for value in [package_key, *(aliases or [])]
+        if normalize_template_package(value)
+    }
+
+
+def template_matches_package(
+    template: QuestionTemplate,
+    package_key: str,
+    aliases: Iterable[str] | None = None,
+) -> bool:
     """Whether ``template`` belongs to ``package_key`` under normalized matching."""
 
-    pkg = normalize_template_package(package_key)
-    if not pkg:
+    labels = _package_match_labels(package_key, aliases)
+    if not labels:
         return False
-    return normalize_template_package(template.subcategory) == pkg
+    return normalize_template_package(template.subcategory) in labels
 
 
 def filter_templates_for_package(
-    templates: Iterable[QuestionTemplate], package_key: str
+    templates: Iterable[QuestionTemplate],
+    package_key: str,
+    aliases: Iterable[str] | None = None,
 ) -> list[QuestionTemplate]:
     """Return templates whose subcategory matches the selected input package."""
 
     return sorted(
-        [t for t in templates if template_matches_package(t, package_key)],
+        [t for t in templates if template_matches_package(t, package_key, aliases)],
         key=lambda t: t.id,
     )
 
 
 def infer_subcategory_for_package(
-    templates: Iterable[QuestionTemplate], package_key: str, fallback: str = ""
+    templates: Iterable[QuestionTemplate],
+    package_key: str,
+    fallback: str = "",
+    aliases: Iterable[str] | None = None,
 ) -> str:
     """Return the UI/display subcategory label for the selected package."""
 
-    matched = filter_templates_for_package(templates, package_key)
+    matched = filter_templates_for_package(templates, package_key, aliases)
     if matched:
         return matched[0].subcategory
     raw = (fallback or "").strip()

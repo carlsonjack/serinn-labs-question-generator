@@ -13,7 +13,6 @@ from core.schema_validator import (
     DATE_FIELDS,
     REQUIRED_FIELDS,
     VALID_ANSWER_TYPES,
-    VALID_PRIORITY_FLAGS,
     RowValidationError,
     ValidationResult,
     _is_valid_iso8601,
@@ -23,10 +22,10 @@ from core.schema_validator import (
 )
 
 
-def _make_row(**overrides: str) -> OutputRow:
+def _make_row(**overrides: object) -> OutputRow:
     """Build a valid OutputRow, applying *overrides* to any field."""
     defaults = {
-        "category_id": "cat_001",
+        "topic_import_id": "mlb-regular-season",
         "subcategory": "MLB",
         "event": "Mets vs Yankees",
         "question": "Who will win?",
@@ -35,7 +34,7 @@ def _make_row(**overrides: str) -> OutputRow:
         "start_date": "2026-05-14T21:40:00",
         "expiration_date": "2026-05-15T21:40:00",
         "resolution_date": "2026-05-16T01:40:00",
-        "priority_flag": "true",
+        "priority": 1,
     }
     defaults.update(overrides)
     return OutputRow(**defaults)
@@ -77,9 +76,9 @@ class TestValidateRow:
     def test_valid_row_no_errors(self) -> None:
         assert validate_row(_make_row()) == []
 
-    def test_missing_required_field_category_id(self) -> None:
-        reasons = validate_row(_make_row(category_id=""))
-        assert any("category_id" in r for r in reasons)
+    def test_missing_required_field_topic_import_id(self) -> None:
+        reasons = validate_row(_make_row(topic_import_id=""))
+        assert any("topic_import_id" in r for r in reasons)
 
     def test_missing_required_field_subcategory(self) -> None:
         reasons = validate_row(_make_row(subcategory=""))
@@ -98,8 +97,8 @@ class TestValidateRow:
         assert any("answer_options" in r for r in reasons)
 
     def test_whitespace_only_counts_as_missing(self) -> None:
-        reasons = validate_row(_make_row(category_id="   "))
-        assert any("category_id" in r for r in reasons)
+        reasons = validate_row(_make_row(topic_import_id="   "))
+        assert any("topic_import_id" in r for r in reasons)
 
     def test_invalid_answer_type(self) -> None:
         reasons = validate_row(_make_row(answer_type="free_text"))
@@ -133,29 +132,31 @@ class TestValidateRow:
         )
         assert validate_row(row) == []
 
-    def test_invalid_priority_flag(self) -> None:
-        reasons = validate_row(_make_row(priority_flag="yes"))
-        assert any("priority_flag" in r for r in reasons)
+    def test_valid_priority_integer(self) -> None:
+        assert validate_row(_make_row(priority=1)) == []
 
-    def test_valid_priority_true(self) -> None:
-        assert not any(
-            "priority_flag" in r
-            for r in validate_row(_make_row(priority_flag="true"))
-        )
+    def test_valid_priority_blank(self) -> None:
+        assert validate_row(_make_row(priority="")) == []
 
-    def test_valid_priority_false(self) -> None:
-        assert not any(
-            "priority_flag" in r
-            for r in validate_row(_make_row(priority_flag="false"))
-        )
+    def test_valid_priority_zero(self) -> None:
+        assert validate_row(_make_row(priority=0)) == []
+
+    @pytest.mark.parametrize("bad_priority", ["true", True])
+    def test_priority_legacy_truthy_value_fails(self, bad_priority: object) -> None:
+        reasons = validate_row(_make_row(priority=bad_priority))
+        assert any("priority" in r and "integer or blank" in r for r in reasons)
+
+    def test_priority_negative_integer_fails(self) -> None:
+        reasons = validate_row(_make_row(priority=-1))
+        assert any("priority" in r and "non-negative integer or blank" in r for r in reasons)
 
     def test_multiple_failures_collected(self) -> None:
         reasons = validate_row(
             _make_row(
-                category_id="",
+                topic_import_id="",
                 answer_type="bad",
                 start_date="nope",
-                priority_flag="maybe",
+                priority="maybe",
             )
         )
         assert len(reasons) >= 4
@@ -164,9 +165,9 @@ class TestValidateRow:
         reasons = validate_row(_make_row(answer_type="Yes_No"))
         assert any("answer_type" in r for r in reasons)
 
-    def test_priority_flag_case_sensitive(self) -> None:
-        reasons = validate_row(_make_row(priority_flag="True"))
-        assert any("priority_flag" in r for r in reasons)
+    def test_priority_legacy_truthy_string_case_insensitive_invalid(self) -> None:
+        reasons = validate_row(_make_row(priority="True"))
+        assert any("priority" in r for r in reasons)
 
 
 # ── Batch validation ─────────────────────────────────────────────────────
@@ -182,7 +183,7 @@ class TestValidateRows:
     def test_all_invalid(self) -> None:
         rows = [
             _make_row(answer_type="bad"),
-            _make_row(priority_flag="yes"),
+            _make_row(priority="yes"),
         ]
         result = validate_rows(rows)
         assert result.valid_count == 0
@@ -325,14 +326,11 @@ class TestWriteErrorsCsv:
 
 
 class TestConstants:
-    def test_required_fields_match_output_columns(self) -> None:
-        assert REQUIRED_FIELDS == OUTPUT_COLUMNS
+    def test_required_fields_exclude_blankable_priority(self) -> None:
+        assert REQUIRED_FIELDS == [col for col in OUTPUT_COLUMNS if col != "priority"]
 
     def test_valid_answer_types(self) -> None:
         assert VALID_ANSWER_TYPES == {"yes_no", "multiple_choice"}
-
-    def test_valid_priority_flags(self) -> None:
-        assert VALID_PRIORITY_FLAGS == {"true", "false"}
 
     def test_date_fields(self) -> None:
         assert DATE_FIELDS == ["start_date", "expiration_date", "resolution_date"]

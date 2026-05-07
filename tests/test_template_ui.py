@@ -7,6 +7,7 @@ from core.template_ui import (
     explain_template,
     filter_templates_for_package,
     infer_subcategory_for_package,
+    package_aliases_for_settings,
     template_to_ui_dict,
 )
 
@@ -19,7 +20,7 @@ def _event_tpl() -> QuestionTemplate:
         question="Who wins {home_team} vs {away_team}?",
         answer_type="multiple_choice",
         answer_options="{home_team}||{away_team}",
-        priority="true",
+        priority=1,
         requires_entities=False,
     )
 
@@ -32,7 +33,7 @@ def _entity_tpl() -> QuestionTemplate:
         question="Who hits a HR?",
         answer_type="multiple_choice",
         answer_options="{entity_options}",
-        priority="false",
+        priority="",
         requires_entities=True,
         stat_column="HR",
         top_n_per_team=2,
@@ -61,3 +62,14 @@ def test_filter_templates_for_package_normalizes_case():
 def test_infer_subcategory_for_package_prefers_template_value():
     subcategory = infer_subcategory_for_package([_event_tpl()], "mlb")
     assert subcategory == "MLB"
+
+
+def test_filter_templates_for_package_accepts_aliases():
+    templates = [_event_tpl()]
+    out = filter_templates_for_package(templates, "baseball", aliases=["MLB"])
+    assert [t.id for t in out] == ["t1"]
+
+
+def test_package_aliases_for_settings_normalizes_package_keys():
+    settings = {"inputs": {"package_aliases": {"formula_one": ["F1", "Formula 1"]}}}
+    assert package_aliases_for_settings(settings, "Formula-One") == ["F1", "Formula 1"]

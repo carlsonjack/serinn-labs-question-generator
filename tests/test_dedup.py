@@ -36,11 +36,11 @@ def _make_row(
     start_date: str = "2026-05-14T19:10:00",
     expiration_date: str = "2026-05-15T19:10:00",
     resolution_date: str = "2026-05-15T23:10:00",
-    priority_flag: str = "true",
-    category_id: str = "CAT001",
+    priority: int | str = 1,
+    topic_import_id: str = "mlb-regular-season",
 ) -> OutputRow:
     return OutputRow(
-        category_id=category_id,
+        topic_import_id=topic_import_id,
         subcategory=subcategory,
         event=event,
         question=question,
@@ -49,7 +49,7 @@ def _make_row(
         start_date=start_date,
         expiration_date=expiration_date,
         resolution_date=resolution_date,
-        priority_flag=priority_flag,
+        priority=priority,
     )
 
 
@@ -161,8 +161,8 @@ class TestRemoveExactDuplicates:
 
     def test_non_key_field_difference_still_duplicate(self):
         """Rows differing only in non-key fields (e.g. priority) are still exact dupes."""
-        a = _make_row(priority_flag="true")
-        b = _make_row(priority_flag="false")
+        a = _make_row(priority=1)
+        b = _make_row(priority="")
         unique, removed = _remove_exact_duplicates([a, b])
         assert len(unique) == 1
         assert removed == 1

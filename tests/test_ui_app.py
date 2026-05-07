@@ -11,7 +11,19 @@ import pytest
 
 from core.pipeline import PipelineResult
 from core.template_config.schema import QuestionTemplate
+import ui.app as ui_app
 from ui.app import create_app
+
+
+@pytest.fixture(autouse=True)
+def reset_ui_jobs():
+    with ui_app._LOCK:
+        ui_app._JOBS.clear()
+        ui_app._ACTIVE_RUN = False
+    yield
+    with ui_app._LOCK:
+        ui_app._JOBS.clear()
+        ui_app._ACTIVE_RUN = False
 
 
 @pytest.fixture()
@@ -20,6 +32,36 @@ def client():
     app.config["TESTING"] = True
     with app.test_client() as c:
         yield c
+
+
+def test_api_save_input_category_unknown_package(client):
+    rv = client.post("/api/input-category", json={"category_key": "not_a_pkg"})
+    assert rv.status_code == 400
+    assert "Unknown" in rv.get_json()["error"]
+
+
+def test_api_save_input_category_persists_canonical_key(client, tmp_path, monkeypatch):
+    cfg = tmp_path / "settings.yaml"
+    monkeypatch.setattr("core.config._SETTINGS", cfg)
+    monkeypatch.setattr("core.config._SETTINGS_LOCAL", tmp_path / "nope.local.yaml")
+    cfg.write_text(
+        "inputs:\n"
+        "  directory: inputs\n"
+        "  category_key: mlb\n"
+        "  files:\n"
+        "    MLS:\n"
+        "      event_source: schedule.xlsx\n"
+        "    mlb:\n"
+        "      event_source: a.xlsx\n",
+        encoding="utf-8",
+    )
+    rv = client.post("/api/input-category", json={"category_key": "mls"})
+    assert rv.status_code == 200
+    assert rv.get_json() == {"ok": True, "category_key": "MLS"}
+    from core.config import load_settings_disk_only
+
+    data = load_settings_disk_only()
+    assert data["inputs"]["category_key"] == "MLS"
 
 
 def test_download_rejects_traversal(client):
@@ -50,7 +92,7 @@ def test_run_returns_409_when_job_active(client):
 
     fake_settings = {
         "openai_api_key": "sk-test",
-        "category_id": "x",
+        "topic_import_id": "x",
         "subcategory": "MLB",
         "date_filter": {"start": "2026-05-15", "end": "2026-06-01"},
         "templates_enabled": {},
@@ -65,7 +107,7 @@ def test_run_returns_409_when_job_active(client):
         r1 = client.post(
             "/run",
             json={
-                "category_id": "x",
+                "topic_import_id": "x",
                 "subcategory": "MLB",
                 "top_n_per_team": 2,
                 "date_start": "2026-05-15",
@@ -77,7 +119,7 @@ def test_run_returns_409_when_job_active(client):
         r2 = client.post(
             "/run",
             json={
-                "category_id": "x",
+                "topic_import_id": "x",
                 "subcategory": "MLB",
                 "top_n_per_team": 2,
                 "date_start": "2026-05-15",
@@ -111,7 +153,7 @@ def test_upload_templates_writes_json(client, tmp_path, monkeypatch):
         "question": "Smoke test question?",
         "answer_type": "yes_no",
         "answer_options": "Yes||No",
-        "priority": "false",
+        "priority": "",
         "requires_entities": False,
     }
     body = json.dumps(tpl)
@@ -136,9 +178,9 @@ def test_upload_templates_writes_multiple_templates_from_csv(client, tmp_path, m
 
     body = (
         "id,subcategory,question_family,question,answer_type,answer_options,priority,requires_entities\n"
-        "csv_tpl_one,MLB,event,First?,yes_no,Yes||No,false,false\n"
+        "csv_tpl_one,MLB,event,First?,yes_no,Yes||No,,false\n"
         "id,subcategory,question_family,question,answer_type,answer_options,priority,requires_entities,stat_column,top_n_per_team\n"
-        "csv_tpl_two,MLB,entity_stat,Second?,multiple_choice,{entity_options},false,true,HR,3\n"
+        "csv_tpl_two,MLB,entity_stat,Second?,multiple_choice,{entity_options},,true,HR,3\n"
     )
     rv = client.post(
         "/upload/templates",
@@ -160,9 +202,9 @@ def test_upload_templates_rejects_duplicate_ids_in_csv(client, tmp_path, monkeyp
 
     body = (
         "id,subcategory,question_family,question,answer_type,answer_options,priority,requires_entities\n"
-        "dup_tpl,MLB,event,First?,yes_no,Yes||No,false,false\n"
+        "dup_tpl,MLB,event,First?,yes_no,Yes||No,,false\n"
         "id,subcategory,question_family,question,answer_type,answer_options,priority,requires_entities\n"
-        "dup_tpl,MLB,event,Second?,yes_no,Yes||No,false,false\n"
+        "dup_tpl,MLB,event,Second?,yes_no,Yes||No,,false\n"
     )
     rv = client.post(
         "/upload/templates",
@@ -203,7 +245,7 @@ def test_api_input_slots_returns_package_filtered_templates(client, tmp_path, mo
                 question="MLB question?",
                 answer_type="yes_no",
                 answer_options="Yes||No",
-                priority="false",
+                priority="",
                 requires_entities=False,
             ),
             "ent_a": QuestionTemplate(
@@ -213,7 +255,7 @@ def test_api_input_slots_returns_package_filtered_templates(client, tmp_path, mo
                 question="Entertainment question?",
                 answer_type="yes_no",
                 answer_options="Yes||No",
-                priority="false",
+                priority="",
                 requires_entities=False,
             ),
         },
@@ -225,6 +267,87 @@ def test_api_input_slots_returns_package_filtered_templates(client, tmp_path, mo
     assert data["category_key"] == "mlb"
     assert [x["id"] for x in data["template_meta"]] == ["mlb_a"]
     assert data["template_subcategory"] == "MLB"
+
+
+def test_ui_handoff_package_alias_upload_and_run(client, tmp_path, monkeypatch):
+    template_dir = tmp_path / "templates"
+    template_dir.mkdir()
+    settings = {
+        "openai_api_key": "sk-test",
+        "topic_import_id": "default",
+        "topic_import_ids": {"formula_one": "f1-race-winner"},
+        "subcategory": "F1",
+        "date_filter": {"start": "2026-01-01", "end": "2026-12-31"},
+        "templates_enabled": {},
+        "inputs": {
+            "directory": str(tmp_path / "inputs"),
+            "category_key": "formula_one",
+            "files": {"formula_one": {"schedule": "f1_schedule.xlsx"}},
+            "file_roles": {"formula_one": {"schedule": "event_source"}},
+            "package_aliases": {"formula_one": "F1"},
+        },
+    }
+
+    def save_updates(updates):
+        updates = dict(updates)
+        inputs_files = updates.pop("_inputs_files", None)
+        if inputs_files is not None:
+            settings.setdefault("inputs", {})["files"] = inputs_files
+        for key, value in updates.items():
+            if isinstance(value, dict) and isinstance(settings.get(key), dict):
+                settings[key].update(value)
+            else:
+                settings[key] = value
+
+    monkeypatch.setattr("ui.app.load_settings", lambda: settings)
+    monkeypatch.setattr("ui.app.load_settings_disk_only", lambda: settings)
+    monkeypatch.setattr("ui.app.save_settings_yaml", save_updates)
+    monkeypatch.setattr("ui.app.resolve_templates_directory", lambda _s: template_dir)
+    monkeypatch.setattr("ui.app.run_pipeline", lambda *_a, **_k: PipelineResult(success=True))
+
+    before = client.get("/api/input-slots?category=formula_one")
+    assert before.status_code == 200
+    assert before.get_json()["template_meta"] == []
+
+    tpl = {
+        "id": "f1_upload_alias_tpl",
+        "subcategory": "F1",
+        "question_family": "event",
+        "question": "Will {home_team} win the race?",
+        "answer_type": "yes_no",
+        "answer_options": "Yes||No",
+        "priority": "",
+        "requires_entities": False,
+    }
+    uploaded = client.post(
+        "/upload/templates",
+        data={"file": (io.BytesIO(json.dumps(tpl).encode("utf-8")), "f1_tpl.json")},
+        content_type="multipart/form-data",
+    )
+    assert uploaded.status_code == 200
+    assert uploaded.get_json()["saved"][0]["id"] == "f1_upload_alias_tpl"
+
+    after = client.get("/api/input-slots?category=formula_one")
+    assert after.status_code == 200
+    meta = after.get_json()["template_meta"]
+    assert [item["id"] for item in meta] == ["f1_upload_alias_tpl"]
+    assert after.get_json()["template_subcategory"] == "F1"
+
+    run = client.post(
+        "/run",
+        json={
+            "input_category_key": "formula_one",
+            "templates_enabled": {"f1_upload_alias_tpl": True},
+        },
+    )
+    assert run.status_code == 200
+    job_id = run.get_json()["job_id"]
+    for _ in range(20):
+        status = client.get(f"/run/status/{job_id}").get_json()
+        if status["state"] in {"succeeded", "failed"}:
+            break
+        time.sleep(0.02)
+    assert status["state"] == "succeeded"
 
 
 def test_api_save_inputs_files(client, tmp_path, monkeypatch):
@@ -275,7 +398,7 @@ def test_save_settings_yaml_roundtrip(tmp_path, monkeypatch):
     monkeypatch.setattr("core.config._SETTINGS_LOCAL", tmp_path / "nope.yaml")
 
     cfg.write_text(
-        "category_id: \"x\"\ndate_filter:\n  start: \"2026-01-01\"\n  end: \"2026-02-01\"\n",
+        "topic_import_id: \"x\"\ndate_filter:\n  start: \"2026-01-01\"\n  end: \"2026-02-01\"\n",
         encoding="utf-8",
     )
     save_settings_yaml({"subcategory": "MLB", "top_n_per_team": 4})

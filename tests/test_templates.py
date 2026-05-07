@@ -37,9 +37,13 @@ def test_load_all_shipped_templates() -> None:
         "f1_race_winner_flag",
         "f1_race_winner_yes_no",
         "f1_race_finish_ahead_yes_no",
+        "mls_sample_event_yesno",
+        "mls_sample_event_mc",
+        "mls_sample_entity_goals",
     }
     assert templates["mlb_game_winner"].question_family == "event"
     assert templates["mlb_game_winner"].answer_type == "multiple_choice"
+    assert isinstance(templates["mlb_game_winner"].priority, int)
     assert templates["mlb_total_runs_over_8_5"].line == 8.5
     assert templates["mlb_home_run"].stat_column == "HR"
     assert templates["mlb_home_run"].top_n_per_team == 2
@@ -54,11 +58,12 @@ def test_parse_template_roundtrip_minimal_event() -> None:
         "question": "Q?",
         "answer_type": "multiple_choice",
         "answer_options": "A||B",
-        "priority": "true",
+        "priority": 1,
         "requires_entities": False,
     }
     t = parse_template_dict(raw)
     assert isinstance(t, QuestionTemplate)
+    assert t.priority == 1
 
 
 def test_rejects_unknown_key() -> None:
@@ -69,7 +74,7 @@ def test_rejects_unknown_key() -> None:
         "question": "Q?",
         "answer_type": "multiple_choice",
         "answer_options": "A||B",
-        "priority": "true",
+        "priority": 1,
         "requires_entities": False,
         "extra": 1,
     }
@@ -96,7 +101,7 @@ def test_duplicate_template_ids_raise(tmp_path: Path) -> None:
         "question": "Q?",
         "answer_type": "yes_no",
         "answer_options": "Yes||No",
-        "priority": "false",
+        "priority": "",
         "requires_entities": False,
     }
     (tmp_path / "a.json").write_text(json.dumps(body), encoding="utf-8")

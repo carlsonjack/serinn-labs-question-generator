@@ -24,7 +24,6 @@ ALLOWED_KEYS: frozenset[str] = frozenset(
 
 QUESTION_FAMILIES: frozenset[str] = frozenset({"event", "entity_stat"})
 ANSWER_TYPES: frozenset[str] = frozenset({"yes_no", "multiple_choice"})
-PRIORITY_FLAGS: frozenset[str] = frozenset({"true", "false"})
 
 
 @dataclass(frozen=True)
@@ -37,7 +36,7 @@ class QuestionTemplate:
     question: str
     answer_type: str
     answer_options: str
-    priority: str
+    priority: int | str
     requires_entities: bool
     stat_column: str | None = None
     top_n_per_team: int | None = None
@@ -70,15 +69,12 @@ def parse_template_dict(data: dict[str, Any]) -> QuestionTemplate:
     question_family = _str_field(data, "question_family")
     question = _str_field(data, "question")
     answer_type = _str_field(data, "answer_type")
-    priority = _str_field(data, "priority")
+    priority = _priority_field(data, "priority")
 
     if question_family not in QUESTION_FAMILIES:
         raise ValueError(f"Invalid question_family: {question_family!r}")
     if answer_type not in ANSWER_TYPES:
         raise ValueError(f"Invalid answer_type: {answer_type!r}")
-    if priority not in PRIORITY_FLAGS:
-        raise ValueError(f"Invalid priority (use 'true' or 'false'): {priority!r}")
-
     requires_entities = data["requires_entities"]
     if not isinstance(requires_entities, bool):
         raise ValueError("requires_entities must be a boolean")
@@ -148,6 +144,21 @@ def _str_field(data: dict[str, Any], key: str) -> str:
     if not val.strip():
         raise ValueError(f"{key} must be non-empty")
     return val
+
+
+def _priority_field(data: dict[str, Any], key: str) -> int | str:
+    if key not in data:
+        raise ValueError(f"Missing required key: {key}")
+    val = data[key]
+    if val == "":
+        return ""
+    if isinstance(val, bool):
+        raise ValueError("priority must be an integer or blank")
+    if isinstance(val, int):
+        if val < 0:
+            raise ValueError("priority must be a non-negative integer or blank")
+        return val
+    raise ValueError("priority must be an integer or blank")
 
 
 def _validate_answer_options(answer_type: str, answer_options: str, requires_entities: bool) -> None:

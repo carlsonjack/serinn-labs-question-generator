@@ -11,6 +11,8 @@ from typing import Any, Iterable
 
 import pandas as pd
 
+from core.json_safe import json_safe
+
 from .contracts import DetectedFile, InputProfile, SourceRole, ValidationIssue, ValidationSeverity
 from .profiles import fingerprint_file, match_profile
 
@@ -323,7 +325,8 @@ def inspect_workbook(
     if chosen_sheet is None:
         raise FileNotFoundError(f"No readable sheets found in {path}")
 
-    if chosen_sheet.source_role == SourceRole.UNKNOWN:
+    resolved_role = preferred_role or (profile.source_role if profile else chosen_sheet.source_role)
+    if resolved_role == SourceRole.UNKNOWN:
         issues.append(
             ValidationIssue(
                 code="unknown_source_role",
@@ -383,4 +386,37 @@ def inspect_file(
         issues=result.issues,
         sheet_detections=result.sheet_detections,
     )
+
+
+def workbook_snapshot(
+    filepath: str | Path,
+    *,
+    sample_rows: int = 5,
+) -> dict[str, Any]:
+    """Return bounded workbook metadata suitable for AI profile proposal prompts."""
+
+    path = Path(filepath)
+    sheets = _read_workbook_sheets(path)
+    out: dict[str, Any] = {
+        "filename": path.name,
+        "format_name": path.suffix.lower().lstrip(".") or "unknown",
+        "sheets": [],
+    }
+    for sheet_index, (sheet_name, frame) in enumerate(sheets.items()):
+        header_row_index = _detect_header_row(frame)
+        columns, records = _build_records(frame, header_row_index)
+        mappings = _canonical_field_mappings(columns)
+        out["sheets"].append(
+            {
+                "sheet_name": sheet_name,
+                "sheet_index": sheet_index,
+                "header_row_index": header_row_index,
+                "columns": columns,
+                "field_mappings": mappings,
+                "inferred_source_role": _infer_source_role(mappings).value,
+                "sample_rows": records[: max(0, sample_rows)],
+                "row_count_estimate": len(records),
+            }
+        )
+    return json_safe(out)
 

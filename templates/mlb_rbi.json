@@ -5,7 +5,7 @@
   "question": "Which player will record an RBI?",
   "answer_type": "multiple_choice",
   "answer_options": "{entity_options}",
-  "priority": "false",
+  "priority": "",
   "requires_entities": true,
   "stat_column": "RBI",
   "top_n_per_team": 2

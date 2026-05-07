@@ -111,6 +111,24 @@ def list_input_categories(settings: Mapping[str, Any]) -> list[str]:
     return sorted(str(k) for k in files_root.keys())
 
 
+def resolve_inputs_package_file_key(
+    settings: Mapping[str, Any], category_key: str
+) -> str | None:
+    """Return the canonical ``inputs.files`` key for *category_key* (case-insensitive)."""
+
+    files_root = (settings.get("inputs") or {}).get("files") or {}
+    if not isinstance(files_root, dict):
+        return None
+    ck = category_key.strip()
+    if ck in files_root and isinstance(files_root[ck], dict):
+        return ck
+    lower = ck.lower()
+    for k, v in files_root.items():
+        if isinstance(k, str) and isinstance(v, dict) and k.lower() == lower:
+            return k
+    return None
+
+
 def iter_input_slots(
     settings: Mapping[str, Any], category_key: str | None = None
 ) -> list[dict[str, Any]]:

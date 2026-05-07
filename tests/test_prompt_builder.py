@@ -47,7 +47,7 @@ def _game_winner_template() -> QuestionTemplate:
         question="Who will win {home_team} vs {away_team}?",
         answer_type="multiple_choice",
         answer_options="{home_team}||{away_team}",
-        priority="true",
+        priority=1,
         requires_entities=False,
     )
 
@@ -60,7 +60,7 @@ def _yes_no_template() -> QuestionTemplate:
         question="Will {home_team} vs {away_team} be decided by more than 2 runs?",
         answer_type="yes_no",
         answer_options="Yes||No",
-        priority="false",
+        priority="",
         requires_entities=False,
     )
 
@@ -73,7 +73,7 @@ def _line_template() -> QuestionTemplate:
         question="Will total runs in {home_team} vs {away_team} exceed {line}?",
         answer_type="yes_no",
         answer_options="Yes||No",
-        priority="false",
+        priority="",
         requires_entities=False,
         line=8.5,
     )
@@ -87,7 +87,7 @@ def _entity_template() -> QuestionTemplate:
         question="Who will hit a home run?",
         answer_type="multiple_choice",
         answer_options="{entity_options}",
-        priority="false",
+        priority="",
         requires_entities=True,
         stat_column="HR",
         top_n_per_team=2,
@@ -216,6 +216,35 @@ class TestPromptBuilderStructure:
         msgs = builder.build_single_prompt(item)
         assert len(msgs) == 2
         assert "Item 1" in msgs[1]["content"]
+
+
+class TestPromptTemplateEvalInvariants:
+    """Offline evals for prompt/template safety as new verticals are added."""
+
+    def test_event_prompt_resolves_placeholders_and_preserves_allowed_options(self):
+        item = PromptItem(template=_game_winner_template(), event=_event())
+        user_msg = PromptBuilder().build_prompt([item])[1]["content"]
+
+        assert "{home_team}" not in user_msg
+        assert "{away_team}" not in user_msg
+        assert "Template ID: mlb_game_winner" in user_msg
+        assert "Event ID: MLB000657" in user_msg
+        assert "Answer options: Athletics||Giants" in user_msg
+
+    def test_entity_prompt_lists_only_supplied_players(self):
+        item = PromptItem(template=_entity_template(), event=_event(), players=_players())
+        user_msg = PromptBuilder().build_prompt([item])[1]["content"]
+
+        assert "Players (use ONLY these as answer options): Aaron Judge, Pete Alonso" in user_msg
+        assert "{entity_options}" not in user_msg
+        assert "Stat: HR" in user_msg
+
+    def test_yes_no_prompt_keeps_fixed_answer_options(self):
+        item = PromptItem(template=_yes_no_template(), event=_event())
+        user_msg = PromptBuilder().build_prompt([item])[1]["content"]
+
+        assert "Answer type: yes_no" in user_msg
+        assert "Answer options: Yes||No" in user_msg
 
 
 # ---------------------------------------------------------------------------

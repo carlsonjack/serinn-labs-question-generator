@@ -8,7 +8,13 @@ from .prompt_builder import (
     PromptConfig,
     PromptItem,
 )
-from .row_assembler import OUTPUT_COLUMNS, OutputRow, RowAssembler, build_event_string
+from .row_assembler import (
+    OUTPUT_COLUMNS,
+    OutputRow,
+    RowAssembler,
+    build_event_string,
+    resolve_topic_import_id,
+)
 from .token_tracker import (
     RunCostSummary,
     TokenUsage,
@@ -36,5 +42,6 @@ __all__ = [
     "PromptItem",
     "RowAssembler",
     "RunCostSummary",
+    "resolve_topic_import_id",
     "TokenUsage",
 ]

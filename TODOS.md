@@ -37,7 +37,7 @@
 
 ## E6 — Client open questions (product)
 
-**What:** Resolve category_id CSV column, timezone assumption, near-duplicate policy.  
+**What:** Resolve Topic Import ID CSV column, timezone assumption, near-duplicate policy.  
 **Why:** Prevents rework in CSV writer and QA.  
 **Depends on:** Client feedback.  
 **Blocked by:** None.

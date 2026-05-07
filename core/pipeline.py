@@ -17,6 +17,7 @@ from core.generation import (
     PromptBuilder,
     PromptItem,
     RowAssembler,
+    resolve_topic_import_id,
 )
 from core.generation.token_tracker import RunCostSummary
 from core.parsers.contracts import (
@@ -36,6 +37,7 @@ from core.template_ui import (
     filter_templates_for_package,
     infer_subcategory_for_package,
     normalize_template_package,
+    package_aliases_for_settings,
 )
 
 logger = logging.getLogger(__name__)
@@ -171,6 +173,16 @@ def _max_generated_questions(settings: Mapping[str, Any]) -> int | None:
     return n if n > 0 else None
 
 
+def _client_failure(message: str, warnings: list[str] | None = None) -> PipelineResult:
+    """Return a structured failure for expected operator/client mistakes."""
+
+    return PipelineResult(
+        success=False,
+        message=message,
+        parser_warnings=warnings or [],
+    )
+
+
 def build_prompt_items(
     bundle: NormalizedBundle,
     templates: list[QuestionTemplate],
@@ -215,7 +227,10 @@ def run_pipeline(
             progress(phase, cur, total)
 
     ck = category_key if category_key is not None else get_inputs_category_key(settings)
-    bundle = load_normalized_bundle(settings, category_key=ck)
+    try:
+        bundle = load_normalized_bundle(settings, category_key=ck)
+    except (FileNotFoundError, ValueError) as exc:
+        return _client_failure(f"Input configuration error: {exc}")
     warnings = _issue_messages(
         [i for i in bundle.issues if i.severity == ValidationSeverity.WARNING]
     )
@@ -236,9 +251,13 @@ def run_pipeline(
         )
 
     tpl_dir = resolve_templates_directory(settings)
-    all_templates = load_template_dir(tpl_dir)
+    try:
+        all_templates = load_template_dir(tpl_dir)
+    except (FileNotFoundError, ValueError) as exc:
+        return _client_failure(f"Template configuration error: {exc}", warnings)
+    aliases = package_aliases_for_settings(settings, ck)
     active = [
-        t for t in filter_templates_for_package(all_templates.values(), ck)
+        t for t in filter_templates_for_package(all_templates.values(), ck, aliases)
         if is_template_enabled(t.id, settings)
     ]
     if not active:
@@ -251,9 +270,13 @@ def run_pipeline(
         active,
         ck,
         fallback=str(settings.get("subcategory") or ""),
+        aliases=aliases,
     )
 
-    items = build_prompt_items(bundle, active, settings)
+    try:
+        items = build_prompt_items(bundle, active, settings)
+    except (TypeError, ValueError) as exc:
+        return _client_failure(f"Generation settings error: {exc}", warnings)
     if not items:
         return PipelineResult(
             success=False,
@@ -272,6 +295,8 @@ def run_pipeline(
             parser_warnings=warnings,
         )
 
+    resolve_topic_import_id(settings, ck)
+
     api_key = settings.get("openai_api_key", "")
     if not api_key:
         return PipelineResult(
@@ -280,7 +305,13 @@ def run_pipeline(
             parser_warnings=warnings,
         )
 
-    batch_size = int(settings.get("batch_size", 100))
+    try:
+        batch_size = int(settings.get("batch_size", 100))
+    except (TypeError, ValueError):
+        return _client_failure(
+            f"Invalid batch_size: {settings.get('batch_size')!r}. Use a positive integer.",
+            warnings,
+        )
     batches = _chunk_items(items, batch_size)
     total_batches = len(batches)
 
@@ -302,7 +333,7 @@ def run_pipeline(
         )
 
     successful_items = _successful_prompt_items(items, batch_result, batch_size)
-    assembler = RowAssembler(settings)
+    assembler = RowAssembler(settings, category_key=ck)
     rows = assembler.assemble_batch(batch_result.questions, successful_items)
 
     prog("Validating and deduplicating", total_batches, total_batches)
@@ -312,12 +343,29 @@ def run_pipeline(
     dedup = deduplicate(dedup_input)
 
     date_filter = settings.get("date_filter", {})
-    out_path = write_generated_csv_auto(
-        dedup.clean_rows,
-        subcategory=subcategory,
-        date_filter=date_filter,
-        output_dir=DEFAULT_OUTPUT_DIR,
-    )
+    try:
+        out_path = write_generated_csv_auto(
+            dedup.clean_rows,
+            subcategory=subcategory,
+            date_filter=date_filter,
+            output_dir=DEFAULT_OUTPUT_DIR,
+        )
+    except KeyError as exc:
+        return PipelineResult(
+            success=False,
+            message=f"Output configuration error: missing date_filter field {exc}.",
+            batch_result=batch_result,
+            validation=validation,
+            parser_warnings=warnings,
+        )
+    except OSError as exc:
+        return PipelineResult(
+            success=False,
+            message=f"Could not write output CSV: {exc}",
+            batch_result=batch_result,
+            validation=validation,
+            parser_warnings=warnings,
+        )
 
     errors_path: Path | None = None
     if validation.invalid_rows:

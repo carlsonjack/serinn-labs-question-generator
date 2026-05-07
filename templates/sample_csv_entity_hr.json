@@ -5,7 +5,7 @@
   "question": "Who will hit a home run in this game?",
   "answer_type": "multiple_choice",
   "answer_options": "{entity_options}",
-  "priority": "false",
+  "priority": "",
   "requires_entities": true,
   "stat_column": "HR",
   "top_n_per_team": 3,

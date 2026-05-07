@@ -106,7 +106,7 @@ INPUT FILES                CONFIG
 2. Add `inputs.files.<Package>` slots and `inputs.file_roles.<Package>` unless using the MLB legacy `event_source` / `metric_source` pair.
 3. Commit or generate `config/input_profiles/` YAML for detector mappings (`category_key` matches registry key; fingerprint may be `null` during bring-up).
 4. Add templates under `templates/` with `subcategory` matching the UI package label.
-5. Optionally set `category_ids.<package>` and `inputs.packages.<vertical>` options (see `inputs.packages.f1`).
+5. Optionally set `topic_import_ids.<package>` and `inputs.packages.<vertical>` options (see `inputs.packages.f1`).
 
 ---
 
@@ -159,7 +159,7 @@ INPUT FILES                CONFIG
   ```yaml
   openai_api_key: ""
   model: "gpt-5.4"
-  category_id: ""
+  topic_import_id: ""
   date_filter:
     start: "2026-05-15"
     end: "2026-06-01"
@@ -236,7 +236,7 @@ INPUT FILES                CONFIG
     "question": "Who will win {home_team} vs {away_team}?",
     "answer_type": "multiple_choice",
     "answer_options": "{home_team}||{away_team}",
-    "priority": "true",
+    "priority": 1,
     "requires_entities": false
   }
   ```
@@ -249,7 +249,7 @@ INPUT FILES                CONFIG
     "answer_type": "multiple_choice",
     "stat_column": "HR",
     "top_n_per_team": 2,
-    "priority": "false",
+    "priority": "",
     "requires_entities": true
   }
   ```
@@ -360,7 +360,7 @@ INPUT FILES                CONFIG
 **Status:** **Complete** (2026-04-14)
 
 - [x] For each generated question, assembles the full output row:
-  - [x] Pulls category_id from config
+  - [x] Pulls Topic Import ID from config
   - [x] Pulls subcategory from template
   - [x] Constructs event string from event record
   - [x] Inserts LLM-generated question text
@@ -377,12 +377,12 @@ INPUT FILES                CONFIG
 
 | What | File | Details |
 |------|------|---------|
-| Row assembler module | `core/generation/row_assembler.py` | New module. `RowAssembler` class accepts `settings` dict at init, reads `category_id`. `assemble(generated, item)` combines a `GeneratedQuestion` + `PromptItem` into an `OutputRow` — pulls `category_id` from settings, `subcategory` and `priority` from template, event string from `build_event_string()`, question text and answer_options from the LLM result, `answer_type` from template, dates via `compute_question_dates()`. `assemble_batch()` handles list matching (positional when order matches, key-based `(template_id, event_id)` fallback when LLM reorders). Unmatched questions logged and skipped. |
-| Output row type | `core/generation/row_assembler.py` | `OutputRow` frozen dataclass with 10 string fields matching client schema. `to_dict()` returns an ordered dict keyed by `OUTPUT_COLUMNS`. `OUTPUT_COLUMNS` constant defines column names and order: `category_id`, `subcategory`, `event`, `question`, `answer_type`, `answer_options`, `start_date`, `expiration_date`, `resolution_date`, `priority_flag`. |
+| Row assembler module | `core/generation/row_assembler.py` | New module. `RowAssembler` class accepts `settings` dict at init, reads Topic Import ID. `assemble(generated, item)` combines a `GeneratedQuestion` + `PromptItem` into an `OutputRow` — pulls Topic Import ID from settings, `subcategory` and `priority` from template, event string from `build_event_string()`, question text and answer_options from the LLM result, `answer_type` from template, dates via `compute_question_dates()`. `assemble_batch()` handles list matching (positional when order matches, key-based `(template_id, event_id)` fallback when LLM reorders). Unmatched questions logged and skipped. |
+| Output row type | `core/generation/row_assembler.py` | `OutputRow` frozen dataclass with 10 fields matching client schema. `to_dict()` returns an ordered dict keyed by `OUTPUT_COLUMNS`. `OUTPUT_COLUMNS` constant defines column names and order: `topic_import_id`, `subcategory`, `event`, `question`, `answer_type`, `answer_options`, `start_date`, `expiration_date`, `resolution_date`, `priority`. |
 | Event string helper | `core/generation/row_assembler.py` | `build_event_string(event)` → `"{away_team} vs {home_team}"`. Standalone function, reusable by downstream CSV/QA. |
 | Package exports | `core/generation/__init__.py` | Updated — now exports `RowAssembler`, `OutputRow`, `OUTPUT_COLUMNS`, `build_event_string` alongside existing Task 5.1 and 5.2 symbols. |
 | Core exports | `core/__init__.py` | Updated — re-exports `RowAssembler`, `OutputRow`, `OUTPUT_COLUMNS`, `build_event_string` for use by downstream epics (CSV writer, QA layer). |
-| Tests | `tests/test_row_assembler.py` | 35 tests across 8 classes: `TestBuildEventString` (standard, different teams), `TestOutputRow` (column order, values), `TestOutputColumns` (count, names), `TestRowAssemblerSingle` (category_id from settings/missing, subcategory, event string, question from LLM, answer_type multiple_choice/yes_no, answer_options event/entity, priority true/false), `TestDateComputation` (start −24h, expiration =event, resolution +4h, direct engine match, different datetime, subcategory→category_key), `TestAssembleBatch` (empty, positional single/multi, key-based reorder, key mismatch skip, mixed templates), `TestRowAssemblerInit` (category_id, missing defaults, settings stored), `TestEndToEndRow` (full event/yesno/entity row round-trip). All passing. |
+| Tests | `tests/test_row_assembler.py` | 35 tests across 8 classes: `TestBuildEventString` (standard, different teams), `TestOutputRow` (column order, values), `TestOutputColumns` (count, names), `TestRowAssemblerSingle` (Topic Import ID from settings/missing, subcategory, event string, question from LLM, answer_type multiple_choice/yes_no, answer_options event/entity, numeric/blank priority), `TestDateComputation` (start −24h, expiration =event, resolution +4h, direct engine match, different datetime, subcategory→category_key), `TestAssembleBatch` (empty, positional single/multi, key-based reorder, key mismatch skip, mixed templates), `TestRowAssemblerInit` (Topic Import ID, missing defaults, settings stored), `TestEndToEndRow` (full event/yesno/entity row round-trip). All passing. |
 
 #### Task 5.4 — Token cost logging
 
@@ -443,18 +443,18 @@ INPUT FILES                CONFIG
 - [x] Check every row has all required fields populated
 - [x] Validate answer_type is exactly "yes_no" or "multiple_choice"
 - [x] Validate date fields parse as valid ISO 8601
-- [x] Validate priority_flag is "true" or "false"
+- [x] Validate priority is a non-negative integer or blank
 - [x] Any row failing validation is written to `outputs/errors.csv` with a reason column
 
 **Leave-behind notes (Task 6.2):**
 
 | What | File | Details |
 |------|------|---------|
-| Schema validation module | `core/schema_validator.py` | New module. `validate_row(row)` checks a single `OutputRow` and returns a list of failure reasons (empty = valid). `validate_rows(rows)` runs validation on all rows and returns a `ValidationResult` dataclass partitioning rows into `valid_rows` and `invalid_rows` (each carrying its failure `reasons`). Validates four rules: (1) all 10 output columns must be non-empty (whitespace-only counts as empty); (2) `answer_type` must be exactly `"yes_no"` or `"multiple_choice"` (case-sensitive); (3) `start_date`, `expiration_date`, `resolution_date` must parse as valid ISO 8601 (supports `YYYY-MM-DDTHH:MM:SS`, `YYYY-MM-DD`, and timezone-aware formats); (4) `priority_flag` must be exactly `"true"` or `"false"` (case-sensitive). No new dependencies — uses only stdlib (`csv`, `datetime`, `pathlib`, `logging`). |
+| Schema validation module | `core/schema_validator.py` | New module. `validate_row(row)` checks a single `OutputRow` and returns a list of failure reasons (empty = valid). `validate_rows(rows)` runs validation on all rows and returns a `ValidationResult` dataclass partitioning rows into `valid_rows` and `invalid_rows` (each carrying its failure `reasons`). Validates four rules: (1) required output columns must be non-empty, while `priority` may be blank; (2) `answer_type` must be exactly `"yes_no"` or `"multiple_choice"` (case-sensitive); (3) `start_date`, `expiration_date`, `resolution_date` must parse as valid ISO 8601 (supports `YYYY-MM-DDTHH:MM:SS`, `YYYY-MM-DD`, and timezone-aware formats); (4) `priority` must be a non-negative integer or blank. No new dependencies — uses only stdlib (`csv`, `datetime`, `pathlib`, `logging`). |
 | Error CSV writer | `core/schema_validator.py` | `write_errors_csv(errors, output_path)` writes invalid rows to CSV with the standard 10 output columns plus a `reason` column. Multiple failures on the same row are semicolon-separated. Auto-creates parent directories. Default path: `outputs/errors.csv`. |
 | Dataclasses | `core/schema_validator.py` | `RowValidationError` holds a reference to the failing `OutputRow` and its `reasons: list[str]`. `ValidationResult` holds `valid_rows`, `invalid_rows`, and computed properties `total_input`, `valid_count`, `invalid_count`. |
-| Package exports | `core/__init__.py` | Updated — now exports `validate_row`, `validate_rows`, `ValidationResult`, `RowValidationError`, `write_errors_csv`, `REQUIRED_FIELDS`, `VALID_ANSWER_TYPES`, `VALID_PRIORITY_FLAGS`, `DATE_FIELDS` alongside existing EPIC 5 and 6.1 symbols. |
-| Tests | `tests/test_schema_validator.py` | 49 tests across 7 classes: `TestIsValidIso8601` (datetime no-tz, date-only, tz-aware, garbage, empty, partial, leap day valid/invalid), `TestValidateRow` (valid row, 5 missing-field variants, whitespace-only, invalid/valid answer_type, 3 invalid dates, valid dates, invalid/valid priority_flag, multiple failures, case sensitivity), `TestValidateRows` (all valid, all invalid, mixed, empty input, total_input, reasons present, identity preservation), `TestValidationResult` (defaults, properties), `TestWriteErrorsCsv` (file creation, columns, row count, reason content, empty input, nested dirs, data match, single-reason no semicolon), `TestConstants` (required fields, answer types, priority flags, date fields). All 49 passing. |
+| Package exports | `core/__init__.py` | Updated — now exports `validate_row`, `validate_rows`, `ValidationResult`, `RowValidationError`, `write_errors_csv`, `REQUIRED_FIELDS`, `VALID_ANSWER_TYPES`, `DATE_FIELDS` alongside existing EPIC 5 and 6.1 symbols. |
+| Tests | `tests/test_schema_validator.py` | 49 tests across 7 classes: `TestIsValidIso8601` (datetime no-tz, date-only, tz-aware, garbage, empty, partial, leap day valid/invalid), `TestValidateRow` (valid row, missing-field variants, whitespace-only, invalid/valid answer_type, invalid dates, valid dates, invalid/valid priority, multiple failures, case sensitivity), `TestValidateRows` (all valid, all invalid, mixed, empty input, total_input, reasons present, identity preservation), `TestValidationResult` (defaults, properties), `TestWriteErrorsCsv` (file creation, columns, row count, reason content, empty input, nested dirs, data match, single-reason no semicolon), `TestConstants` (required fields, answer types, date fields). All 49 passing. |
 
 #### Task 6.3 — QA summary report
 
@@ -832,6 +832,6 @@ Skipped — `codex` CLI not available in this environment.
 | Eng Review | `/plan-eng-review` | Architecture & tests (required) | 1 | CLEAR (plan) | Structured outputs + job/poll + download hardening + test plan; see section above |
 | Design Review | `/plan-design-review` | UI/UX gaps | 0 | — | — |
 
-**UNRESOLVED:** Client open questions (category_id, timezone, near-dup policy) — listed in Epic + `TODOS.md` E6.
+**UNRESOLVED:** Client open questions (Topic Import ID, timezone, near-dup policy) — listed in Epic + `TODOS.md` E6.
 
 **VERDICT:** **Eng plan review complete** — implement with amendments and `TODOS.md`. Optional next: **`/plan-design-review`** for Flask single-page UX (progress, errors, empty states). Run **`/ship`** when code exists and diff-scoped reviews apply.

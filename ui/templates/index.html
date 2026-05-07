@@ -240,6 +240,22 @@
         font-size: 0.9rem;
         margin-top: 0.35rem;
         cursor: pointer;
+        transition:
+          border-color 0.15s ease,
+          background 0.15s ease;
+      }
+      .tpl-upload-zone.has-pending {
+        border-style: solid;
+        border-color: #9eb4d6;
+        background: #f8faff;
+      }
+      .tpl-upload-zone.has-pending strong {
+        color: var(--accent);
+      }
+      #tpl-pending-label {
+        margin-top: 0.35rem;
+        min-height: 1.2rem;
+        font-size: 0.82rem;
       }
       button.secondary {
         background: #5c6578;
@@ -317,7 +333,11 @@
           <p class="muted small" style="margin: 0.35rem 0 0.65rem">
             Each <strong>package</strong> (e.g. <code>mlb</code>) maps <strong>slot ids</strong> to the
             filename used under <code>inputs/</code> when you upload. Slot ids should match your input
-            profiles (e.g. <code>event_source</code>, <code>metric_source</code>).
+            profiles (e.g. <code>event_source</code>, <code>metric_source</code>). You can use any
+            <code>.xlsx</code> basename per slot; common slot names like <code>schedule</code> or
+            <code>stats</code> are auto-mapped to roles when <code>inputs.file_roles</code> omits that
+            package, or use <code>event_source</code> + <code>metric_source</code> for zero-config
+            schedule+stats packages.
           </p>
           <div id="inputs-files-root"></div>
           <div class="actions" style="margin-top: 0.35rem">
@@ -369,8 +389,20 @@
         </div>
 
         <div class="actions">
-          <button type="button" id="btn-upload">Save uploads to inputs/</button>
+          <button type="button" id="btn-upload">
+            Save uploads + create normalizer profile
+          </button>
           <span class="muted" id="upload-msg"></span>
+        </div>
+
+        <div style="margin-top: 0.9rem; border-top: 1px solid var(--border); padding-top: 0.85rem">
+          <h2>AI normalizer</h2>
+          <p class="muted small" style="margin-top: -0.25rem">
+            The upload button saves the selected files, analyzes their layout, and saves a
+            deterministic normalization profile in one step.
+          </p>
+          <div class="muted small" id="normalizer-msg"></div>
+          <div class="summary" id="normalizer-preview" hidden></div>
         </div>
       </section>
 
@@ -386,8 +418,8 @@
             <input type="text" id="date_end" value="{{ settings.date_filter.end }}" placeholder="YYYY-MM-DD" />
           </div>
         </div>
-        <label for="category_id">Category ID</label>
-        <input type="text" id="category_id" value="{{ settings.category_id or '' }}" />
+        <label for="topic_import_id">Topic Import ID</label>
+        <input type="text" id="topic_import_id" value="{{ settings.topic_import_id or '' }}" />
 
         <label for="subcategory">Subcategory label</label>
         <input type="text" id="subcategory" value="{{ settings.subcategory or 'MLB' }}" />
@@ -457,6 +489,7 @@
         </p>
         <div class="tpl-upload-zone" id="tpl-upload-zone" tabindex="0">
           <strong>Add template file</strong> — drop CSV or JSON file(s) here or click
+          <div class="muted" id="tpl-pending-label" aria-live="polite"></div>
         </div>
         <input type="file" id="tpl-files" accept=".csv,.json,text/csv,application/json" multiple />
         <div class="actions" style="margin-top: 0.5rem">
@@ -489,6 +522,7 @@
 
         let inputsFilesState = {{ inputs_files_map | tojson }};
         let templatesEnabledState = {{ (settings.get("templates_enabled") or {}) | tojson }};
+        let currentNormalizerSpec = null;
 
         function isTemplateEnabled(templateMeta) {
           if (
@@ -567,6 +601,62 @@
           }
         }
 
+        async function fetchAndRenderInputSlots(cat, options) {
+          options = options || {};
+          const root = $("input-slots-root");
+          if (!options.keepUploadMsg) {
+            $("upload-msg").textContent = "";
+          }
+          root.innerHTML = "<p class=\"muted\">Loading…</p>";
+          const r = await fetch(
+            "/api/input-slots?category=" + encodeURIComponent(cat)
+          );
+          const j = await r.json();
+          if (!r.ok) {
+            root.innerHTML =
+              "<p class=\"muted\">" +
+              escapeHtml(j.error || "Could not load slots") +
+              "</p>";
+            return { ok: false, error: j.error || "Could not load slots" };
+          }
+          root.innerHTML = j.slots
+            .map(function (s) {
+              return (
+                '<div class="input-slot-wrap" data-slot-id="' +
+                escapeHtml(s.slot_id) +
+                '">' +
+                '<div class="drop" id="drop-' +
+                escapeHtml(s.slot_id) +
+                '" data-input="file-' +
+                escapeHtml(s.slot_id) +
+                '" tabindex="0">' +
+                "<strong>" +
+                escapeHtml(s.label) +
+                "</strong> — drop <code>.xlsx</code> here or click" +
+                '<div class="target-name muted">Saved as <code>' +
+                escapeHtml(s.target_filename) +
+                "</code></div></div>" +
+                '<input type="file" id="file-' +
+                escapeHtml(s.slot_id) +
+                '" class="slot-file" data-slot-id="' +
+                escapeHtml(s.slot_id) +
+                '" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" />' +
+                '<div class="slot-line muted" id="line-' +
+                escapeHtml(s.slot_id) +
+                '"></div></div>'
+              );
+            })
+            .join("");
+          j.slots.forEach(function (s) {
+            wireSlot(s.slot_id);
+          });
+          refreshTemplateSection(
+            j.template_meta || [],
+            j.template_subcategory || cat
+          );
+          return { ok: true, j: j };
+        }
+
         function gatherInputsFilesFromDom() {
           const out = {};
           document.querySelectorAll("#inputs-files-root .pkg-card").forEach(function (card) {
@@ -609,7 +699,7 @@
                     '<div class="slot-row">' +
                     '<input type="text" class="slot-id-inp" value="' +
                     escapeHtml(sid) +
-                    '" placeholder="e.g. event_source" />' +
+                    '" placeholder="event_source, schedule, …" />' +
                     '<input type="text" class="slot-file-inp" value="' +
                     escapeHtml(slots[sid]) +
                     '" placeholder="schedule.xlsx" />' +
@@ -773,7 +863,10 @@
             name = "package_" + i;
             i++;
           }
-          inputsFilesState[name] = { slot_1: "file.xlsx" };
+          inputsFilesState[name] = {
+            event_source: "schedule.xlsx",
+            metric_source: "stats.xlsx",
+          };
           renderInputsFilesEditor();
         });
 
@@ -806,63 +899,35 @@
 
         $("input_category_key").addEventListener("change", async () => {
           const cat = $("input_category_key").value;
-          $("upload-msg").textContent = "";
-          const root = $("input-slots-root");
-          root.innerHTML = "<p class=\"muted\">Loading…</p>";
+          currentNormalizerSpec = null;
+          $("normalizer-preview").hidden = true;
+          $("normalizer-msg").textContent = "";
           try {
-            const r = await fetch(
-              "/api/input-slots?category=" + encodeURIComponent(cat)
-            );
-            const j = await r.json();
-            if (!r.ok) {
-              root.innerHTML =
-                "<p class=\"muted\">" +
-                escapeHtml(j.error || "Could not load slots") +
-                "</p>";
+            const res = await fetchAndRenderInputSlots(cat);
+            if (!res.ok) return;
+            const pr = await fetch("/api/input-category", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                category_key: res.j.category_key || cat,
+              }),
+            });
+            const pj = await pr.json();
+            if (!pr.ok) {
+              $("upload-msg").textContent =
+                pj.error || "Could not save selected input package to settings.";
               return;
             }
-            root.innerHTML = j.slots
-              .map(function (s) {
-                return (
-                  '<div class="input-slot-wrap" data-slot-id="' +
-                  escapeHtml(s.slot_id) +
-                  '">' +
-                  '<div class="drop" id="drop-' +
-                  escapeHtml(s.slot_id) +
-                  '" data-input="file-' +
-                  escapeHtml(s.slot_id) +
-                  '" tabindex="0">' +
-                  "<strong>" +
-                  escapeHtml(s.label) +
-                  "</strong> — drop <code>.xlsx</code> here or click" +
-                  '<div class="target-name muted">Saved as <code>' +
-                  escapeHtml(s.target_filename) +
-                  "</code></div></div>" +
-                  '<input type="file" id="file-' +
-                  escapeHtml(s.slot_id) +
-                  '" class="slot-file" data-slot-id="' +
-                  escapeHtml(s.slot_id) +
-                  '" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" />' +
-                  '<div class="slot-line muted" id="line-' +
-                  escapeHtml(s.slot_id) +
-                  '"></div></div>'
-                );
-              })
-              .join("");
-            j.slots.forEach(function (s) {
-              wireSlot(s.slot_id);
-            });
-            refreshTemplateSection(
-              j.template_meta || [],
-              j.template_subcategory || cat
-            );
+            if (pj.category_key && $("input_category_key").value !== pj.category_key) {
+              $("input_category_key").value = pj.category_key;
+            }
           } catch (e) {
-            root.innerHTML =
+            $("input-slots-root").innerHTML =
               '<p class="muted">' + escapeHtml(String(e)) + "</p>";
           }
         });
 
-        $("btn-upload").addEventListener("click", async () => {
+        async function uploadSelectedInputFiles() {
           const fd = new FormData();
           fd.append("category_key", $("input_category_key").value);
           let n = 0;
@@ -874,15 +939,13 @@
             }
           });
           if (n === 0) {
-            $("upload-msg").textContent = "Choose at least one file.";
-            return;
+            throw new Error("Choose at least one file.");
           }
           $("upload-msg").textContent = "Uploading…";
           const r = await fetch("/upload", { method: "POST", body: fd });
           const j = await r.json();
           if (!r.ok) {
-            $("upload-msg").textContent = j.error || "Upload failed";
-            return;
+            throw new Error(j.error || "Upload failed");
           }
           const names = (j.saved || []).map(function (x) {
             return x.filename;
@@ -901,7 +964,121 @@
               );
             }
           });
+          return j;
+        }
+
+        async function analyzeInputNormalizer() {
+          const r = await fetch("/api/normalizer/analyze", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              category_key: $("input_category_key").value,
+              use_ai: true,
+            }),
+          });
+          const j = await r.json();
+          if (!r.ok) {
+            throw new Error(j.error || "Analyze failed");
+          }
+          currentNormalizerSpec = j.spec;
+          renderNormalizerPreview(j);
+          return j;
+        }
+
+        async function saveCurrentNormalizerProfile() {
+          if (!currentNormalizerSpec) {
+            throw new Error("Analyze inputs first.");
+          }
+          const r = await fetch("/api/normalizer/save", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ spec: currentNormalizerSpec }),
+          });
+          const j = await r.json();
+          if (!r.ok) {
+            throw new Error(j.error || "Save failed");
+          }
+          return j;
+        }
+
+        $("btn-upload").addEventListener("click", async () => {
+          const button = $("btn-upload");
+          const uploadMsg = $("upload-msg");
+          const normalizerMsg = $("normalizer-msg");
+          currentNormalizerSpec = null;
+          $("normalizer-preview").hidden = true;
+          button.disabled = true;
+          normalizerMsg.textContent = "";
+          try {
+            await uploadSelectedInputFiles();
+            normalizerMsg.textContent = "Analyzing saved inputs…";
+            const proposal = await analyzeInputNormalizer();
+            normalizerMsg.textContent = "Saving normalizer profile…";
+            await saveCurrentNormalizerProfile();
+            normalizerMsg.textContent = proposal.used_ai
+              ? "AI normalizer profile saved."
+              : "Heuristic normalizer profile saved (no API key found).";
+          } catch (e) {
+            const message = String(e && e.message ? e.message : e);
+            uploadMsg.textContent = message;
+            normalizerMsg.textContent = message;
+          } finally {
+            button.disabled = false;
+          }
         });
+
+        function renderNormalizerPreview(data) {
+          const box = $("normalizer-preview");
+          if (!box) return;
+          const preview = data.preview || {};
+          const spec = data.spec || {};
+          const issueLines = (preview.issues || []).map(function (issue) {
+            return (
+              "- " +
+              (issue.severity || "issue") +
+              ": " +
+              (issue.code || "") +
+              " " +
+              (issue.message || "")
+            );
+          });
+          const events = (preview.events || []).slice(0, 5).map(function (e) {
+            return (
+              "- " +
+              e.event_id +
+              ": " +
+              e.home_team +
+              " vs " +
+              e.away_team +
+              " @ " +
+              e.event_datetime
+            );
+          });
+          const players = (preview.player_stats || []).slice(0, 10).map(function (p) {
+            return (
+              "- " +
+              p.player_name +
+              " (" +
+              p.team +
+              "): " +
+              Object.keys(p.stat_values || {}).join(", ")
+            );
+          });
+          box.hidden = false;
+          box.textContent =
+            "Proposed profile for " +
+            (spec.package_key || $("input_category_key").value) +
+            "\nEvents: " +
+            (preview.event_count || 0) +
+            " | Player stats: " +
+            (preview.player_stat_count || 0) +
+            "\n\nEvent preview:\n" +
+            (events.join("\n") || "- none") +
+            "\n\nPlayer stat preview:\n" +
+            (players.join("\n") || "- none") +
+            "\n\nIssues:\n" +
+            (issueLines.join("\n") || "- none");
+        }
 
         function maxGeneratedQuestionsPayload() {
           const raw = $("max_q").value.trim();
@@ -914,7 +1091,7 @@
         function collectPayload() {
           mergeDomIntoInputsState();
           return {
-            category_id: $("category_id").value.trim(),
+            topic_import_id: $("topic_import_id").value.trim(),
             subcategory: $("subcategory").value.trim() || "MLB",
             top_n_per_team: parseInt($("top_n").value, 10) || 3,
             date_start: $("date_start").value.trim(),
@@ -928,6 +1105,30 @@
 
         const tplZone = $("tpl-upload-zone");
         const tplFiles = $("tpl-files");
+        const tplPendingLabel = $("tpl-pending-label");
+
+        function updateTplPendingVisual() {
+          if (!tplZone || !tplFiles) return;
+          const n = tplFiles.files.length;
+          if (n === 0) {
+            tplZone.classList.remove("has-pending");
+            if (tplPendingLabel) tplPendingLabel.textContent = "";
+            return;
+          }
+          tplZone.classList.add("has-pending");
+          if (tplPendingLabel) {
+            const names = Array.from(tplFiles.files)
+              .map(function (f) {
+                return f.name;
+              })
+              .join(", ");
+            tplPendingLabel.textContent =
+              n === 1
+                ? "Selected: " + names + " — click Upload to save."
+                : n + " files selected: " + names + " — click Upload to save.";
+          }
+        }
+
         tplZone.addEventListener("click", () => tplFiles.click());
         tplZone.addEventListener("keydown", (e) => {
           if (e.key === "Enter" || e.key === " ") {
@@ -947,8 +1148,12 @@
         tplZone.addEventListener("drop", (e) => {
           e.preventDefault();
           tplZone.style.background = "";
-          if (e.dataTransfer.files.length) tplFiles.files = e.dataTransfer.files;
+          if (e.dataTransfer.files.length) {
+            tplFiles.files = e.dataTransfer.files;
+            tplFiles.dispatchEvent(new Event("change", { bubbles: true }));
+          }
         });
+        tplFiles.addEventListener("change", updateTplPendingVisual);
 
         $("btn-tpl-upload").addEventListener("click", async () => {
           const msg = $("tpl-upload-msg");
@@ -974,16 +1179,32 @@
               })
               .join("; ");
             if (j.saved && j.saved.length) {
-              msg.textContent =
-                "Saved " +
-                j.saved.map(function (x) {
-                  return x.id;
-                }).join(", ") +
-                (errTxt ? " — errors: " + errTxt : "") +
-                ". Reloading…";
-              setTimeout(function () {
-                location.reload();
-              }, 600);
+              (j.saved || []).forEach(function (x) {
+                templatesEnabledState[x.id] = true;
+              });
+              const cat = $("input_category_key").value;
+              const slotRes = await fetchAndRenderInputSlots(cat, {
+                keepUploadMsg: true,
+              });
+              if (!slotRes.ok) {
+                msg.textContent =
+                  "Templates saved; refresh the page to reload slots. " +
+                  (slotRes.error || "");
+              } else {
+                msg.textContent =
+                  "Saved " +
+                  j.saved.map(function (x) {
+                    return x.id;
+                  }).join(", ") +
+                  (errTxt ? " — errors: " + errTxt : "") +
+                  ".";
+              }
+              try {
+                tplFiles.value = "";
+              } catch (_e) {
+                /* ignore */
+              }
+              updateTplPendingVisual();
             } else {
               msg.textContent = errTxt || "Nothing saved.";
             }

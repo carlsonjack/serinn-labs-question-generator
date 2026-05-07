@@ -93,7 +93,7 @@ def _coerce_csv_value(key: str, value: Any) -> Any:
     if key == "line":
         return _parse_float(raw, key)
     if key == "priority":
-        return raw.lower()
+        return _parse_int(raw, key)
     return raw
 
 

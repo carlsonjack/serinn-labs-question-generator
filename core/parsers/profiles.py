@@ -8,10 +8,11 @@ from pathlib import Path
 
 import yaml
 
-from .contracts import InputProfile, SourceRole
+from .contracts import InputProfile, NormalizationSpec, SourceRole
 
 _ROOT = Path(__file__).resolve().parent.parent.parent
 _PROFILE_DIR = _ROOT / "config" / "input_profiles"
+_NORMALIZER_PROFILE_DIRNAME = "normalizers"
 
 
 def get_profile_dir() -> Path:
@@ -19,6 +20,14 @@ def get_profile_dir() -> Path:
 
     _PROFILE_DIR.mkdir(parents=True, exist_ok=True)
     return _PROFILE_DIR
+
+
+def get_normalizer_profile_dir() -> Path:
+    """Return the declarative normalizer profile directory."""
+
+    path = get_profile_dir() / _NORMALIZER_PROFILE_DIRNAME
+    path.mkdir(parents=True, exist_ok=True)
+    return path
 
 
 def slugify(value: str) -> str:
@@ -56,6 +65,34 @@ def save_profile(profile: InputProfile) -> Path:
     with path.open("w", encoding="utf-8") as handle:
         yaml.safe_dump(profile.to_dict(), handle, sort_keys=True)
     return path
+
+
+def normalization_spec_path(package_key: str) -> Path:
+    """Resolve the declarative normalizer profile path for a package."""
+
+    return get_normalizer_profile_dir() / f"{slugify(package_key)}.yaml"
+
+
+def save_normalization_spec(spec: NormalizationSpec) -> Path:
+    """Persist an approved declarative normalizer profile."""
+
+    path = normalization_spec_path(spec.package_key)
+    with path.open("w", encoding="utf-8") as handle:
+        yaml.safe_dump(spec.to_dict(), handle, sort_keys=False)
+    return path
+
+
+def load_normalization_spec(package_key: str) -> NormalizationSpec | None:
+    """Load an approved declarative normalizer profile for *package_key*."""
+
+    path = normalization_spec_path(package_key)
+    if not path.is_file():
+        return None
+    with path.open(encoding="utf-8") as handle:
+        raw = yaml.safe_load(handle) or {}
+    if not isinstance(raw, dict):
+        raise ValueError(f"Invalid normalization spec: {path}")
+    return NormalizationSpec.from_dict(raw)
 
 
 def load_profiles(category_key: str | None = None) -> list[InputProfile]:

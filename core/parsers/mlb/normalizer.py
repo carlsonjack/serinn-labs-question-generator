@@ -14,6 +14,20 @@ from .schedule import MlbScheduleParser
 from .stats import MlbStatsParser
 
 
+def _category_key_from_detected_files(
+    detected_files: Sequence[DetectedFile], *, default: str = "mlb"
+) -> str:
+    """Reuse the category key from detection (e.g. ``mls``) when re-parsing in normalize()."""
+
+    for d in detected_files:
+        prof = d.profile_used
+        if prof is not None:
+            raw = str(getattr(prof, "category_key", "") or "").strip()
+            if raw:
+                return raw
+    return default
+
+
 @register_category_normalizer("mlb")
 class MlbCategoryNormalizer(CategoryNormalizer):
     """Normalize MLB schedule and stats sources into one bundle."""
@@ -30,8 +44,13 @@ class MlbCategoryNormalizer(CategoryNormalizer):
         if schedule_path is None or stats_path is None:
             raise ValueError("MLB normalization requires both event and metric sources.")
 
-        schedule_result = MlbScheduleParser(dict(settings)).load(schedule_path).normalize()
-        stats_parser = MlbStatsParser().load(stats_path)
+        category_key = _category_key_from_detected_files(detected_files, default="mlb")
+        schedule_result = (
+            MlbScheduleParser(dict(settings), category_key=category_key)
+            .load(schedule_path)
+            .normalize()
+        )
+        stats_parser = MlbStatsParser(category_key=category_key).load(stats_path)
         stats_result = stats_parser.normalize()
 
         issues = [

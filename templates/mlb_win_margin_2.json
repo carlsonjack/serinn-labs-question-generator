@@ -5,6 +5,6 @@
   "question": "Will {home_team} vs {away_team} be decided by more than 2 runs?",
   "answer_type": "yes_no",
   "answer_options": "Yes||No",
-  "priority": "false",
+  "priority": "",
   "requires_entities": false
 }

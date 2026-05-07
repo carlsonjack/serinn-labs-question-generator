@@ -21,9 +21,9 @@ from core.qa_summary import (
 from core.schema_validator import RowValidationError, ValidationResult
 
 
-def _make_row(**overrides: str) -> OutputRow:
+def _make_row(**overrides: object) -> OutputRow:
     defaults = {
-        "category_id": "cat_001",
+        "topic_import_id": "mlb-regular-season",
         "subcategory": "MLB",
         "event": "Mets vs Yankees",
         "question": "Who will win?",
@@ -32,7 +32,7 @@ def _make_row(**overrides: str) -> OutputRow:
         "start_date": "2026-05-14T21:40:00",
         "expiration_date": "2026-05-15T21:40:00",
         "resolution_date": "2026-05-16T01:40:00",
-        "priority_flag": "true",
+        "priority": 1,
     }
     defaults.update(overrides)
     return OutputRow(**defaults)

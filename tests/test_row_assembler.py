@@ -21,7 +21,7 @@ from core.template_config.schema import QuestionTemplate
 # ---------------------------------------------------------------------------
 
 SETTINGS: dict = {
-    "category_id": "CAT-001",
+    "topic_import_id": "mlb-regular-season",
     "date_rules": {
         "default": {
             "start_offset_hours": -24,
@@ -43,7 +43,7 @@ EVENT_TEMPLATE = QuestionTemplate(
     question="Who will win {home_team} vs {away_team}?",
     answer_type="multiple_choice",
     answer_options="{home_team}||{away_team}",
-    priority="true",
+    priority=1,
     requires_entities=False,
 )
 
@@ -54,7 +54,7 @@ YESNO_TEMPLATE = QuestionTemplate(
     question="Will {home_team} vs {away_team} be decided by more than 2 runs?",
     answer_type="yes_no",
     answer_options="Yes||No",
-    priority="false",
+    priority="",
     requires_entities=False,
 )
 
@@ -65,7 +65,7 @@ ENTITY_TEMPLATE = QuestionTemplate(
     question="Who will hit a home run?",
     answer_type="multiple_choice",
     answer_options="{entity_options}",
-    priority="false",
+    priority="",
     requires_entities=True,
     stat_column="HR",
     top_n_per_team=2,
@@ -146,7 +146,7 @@ class TestBuildEventString:
 class TestOutputRow:
     def test_to_dict_returns_all_columns(self):
         row = OutputRow(
-            category_id="C1",
+            topic_import_id="C1",
             subcategory="MLB",
             event="Giants vs Athletics",
             question="Who wins?",
@@ -155,14 +155,14 @@ class TestOutputRow:
             start_date="2026-05-14T21:40:00",
             expiration_date="2026-05-15T21:40:00",
             resolution_date="2026-05-16T01:40:00",
-            priority_flag="true",
+            priority=1,
         )
         d = row.to_dict()
         assert list(d.keys()) == OUTPUT_COLUMNS
 
     def test_to_dict_values_match(self):
         row = OutputRow(
-            category_id="C1",
+            topic_import_id="C1",
             subcategory="MLB",
             event="Giants vs Athletics",
             question="Who wins?",
@@ -171,12 +171,12 @@ class TestOutputRow:
             start_date="2026-05-14T21:40:00",
             expiration_date="2026-05-15T21:40:00",
             resolution_date="2026-05-16T01:40:00",
-            priority_flag="true",
+            priority=1,
         )
         d = row.to_dict()
-        assert d["category_id"] == "C1"
+        assert d["topic_import_id"] == "C1"
         assert d["subcategory"] == "MLB"
-        assert d["priority_flag"] == "true"
+        assert d["priority"] == 1
 
 
 class TestOutputColumns:
@@ -185,7 +185,7 @@ class TestOutputColumns:
 
     def test_column_names(self):
         expected = [
-            "category_id",
+            "topic_import_id",
             "subcategory",
             "event",
             "question",
@@ -194,7 +194,7 @@ class TestOutputColumns:
             "start_date",
             "expiration_date",
             "resolution_date",
-            "priority_flag",
+            "priority",
         ]
         assert OUTPUT_COLUMNS == expected
 
@@ -210,27 +210,32 @@ class TestRowAssemblerSingle:
     def setup_method(self):
         self.assembler = RowAssembler(SETTINGS)
 
-    def test_category_id_from_settings(self):
+    def test_topic_import_id_from_settings(self):
         row = self.assembler.assemble(_gen_q(), _item())
-        assert row.category_id == "CAT-001"
+        assert row.topic_import_id == "mlb-regular-season"
 
-    def test_category_ids_override_per_package(self):
+    def test_topic_import_ids_override_per_package(self):
         settings = {
             **SETTINGS,
             "inputs": {
                 "category_key": "f1",
                 "files": {"f1": {"schedule": "x.xlsx"}},
             },
-            "category_ids": {"f1": "f1_race_winner"},
+            "topic_import_ids": {"f1": "f1-race-winner"},
         }
         assembler = RowAssembler(settings)
         row = assembler.assemble(_gen_q(), _item())
-        assert row.category_id == "f1_race_winner"
+        assert row.topic_import_id == "f1-race-winner"
 
-    def test_category_id_empty_when_missing(self):
+    def test_topic_import_id_missing_raises_clear_error(self):
         assembler = RowAssembler({})
-        row = assembler.assemble(_gen_q(), _item())
-        assert row.category_id == ""
+        with pytest.raises(ValueError, match="topic_import_id is required in config but was not set"):
+            assembler.assemble(_gen_q(), _item())
+
+    def test_topic_import_id_whitespace_raises_clear_error(self):
+        assembler = RowAssembler({"topic_import_id": "   "})
+        with pytest.raises(ValueError, match="topic_import_id is required in config but was not set"):
+            assembler.assemble(_gen_q(), _item())
 
     def test_subcategory_from_template(self):
         row = self.assembler.assemble(_gen_q(), _item())
@@ -278,11 +283,11 @@ class TestRowAssemblerSingle:
         assert "Mike Trout" in row.answer_options
         assert "Shohei Ohtani" in row.answer_options
 
-    def test_priority_flag_true(self):
+    def test_priority_integer(self):
         row = self.assembler.assemble(_gen_q(), _item())
-        assert row.priority_flag == "true"
+        assert row.priority == 1
 
-    def test_priority_flag_false(self):
+    def test_priority_blank(self):
         q = _gen_q(
             template_id="mlb_win_margin_2",
             question="Will the game be decided by more than 2 runs?",
@@ -290,7 +295,7 @@ class TestRowAssemblerSingle:
         )
         item = _item(template=YESNO_TEMPLATE)
         row = self.assembler.assemble(q, item)
-        assert row.priority_flag == "false"
+        assert row.priority == ""
 
 
 # ---------------------------------------------------------------------------
@@ -429,13 +434,13 @@ class TestAssembleBatch:
 
 
 class TestRowAssemblerInit:
-    def test_reads_category_id(self):
-        assembler = RowAssembler({"category_id": "XYZ"})
-        assert assembler.category_id == "XYZ"
+    def test_reads_topic_import_id(self):
+        assembler = RowAssembler({"topic_import_id": "XYZ"})
+        assert assembler.topic_import_id == "XYZ"
 
-    def test_missing_category_id_defaults_empty(self):
+    def test_missing_topic_import_id_defaults_empty_until_resolved(self):
         assembler = RowAssembler({})
-        assert assembler.category_id == ""
+        assert assembler.topic_import_id == ""
 
     def test_settings_stored(self):
         assembler = RowAssembler(SETTINGS)
@@ -459,7 +464,7 @@ class TestEndToEndRow:
         row = assembler.assemble(q, _item())
         d = row.to_dict()
         assert d == {
-            "category_id": "CAT-001",
+            "topic_import_id": "mlb-regular-season",
             "subcategory": "MLB",
             "event": "Giants vs Athletics",
             "question": "Who will emerge victorious when the Giants face the Athletics?",
@@ -468,7 +473,7 @@ class TestEndToEndRow:
             "start_date": "2026-05-14T21:40:00",
             "expiration_date": "2026-05-15T21:40:00",
             "resolution_date": "2026-05-16T01:40:00",
-            "priority_flag": "true",
+            "priority": 1,
         }
 
     def test_full_yesno_row(self):
@@ -483,7 +488,7 @@ class TestEndToEndRow:
         d = row.to_dict()
         assert d["answer_type"] == "yes_no"
         assert d["answer_options"] == "Yes||No"
-        assert d["priority_flag"] == "false"
+        assert d["priority"] == ""
 
     def test_full_entity_row(self):
         assembler = RowAssembler(SETTINGS)
@@ -501,5 +506,5 @@ class TestEndToEndRow:
         d = row.to_dict()
         assert d["answer_type"] == "multiple_choice"
         assert d["answer_options"] == "Mike Trout||Aaron Judge"
-        assert d["priority_flag"] == "false"
+        assert d["priority"] == ""
         assert d["subcategory"] == "MLB"

@@ -5,7 +5,7 @@
   "question": "Will the home team score first?",
   "answer_type": "yes_no",
   "answer_options": "Yes||No",
-  "priority": "false",
+  "priority": "",
   "requires_entities": false,
   "_comment": "Sample upload — yes/no event"
 }

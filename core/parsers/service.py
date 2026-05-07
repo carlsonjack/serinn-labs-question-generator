@@ -5,11 +5,16 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Mapping
 
-from .contracts import NormalizedBundle, SourceRole, ValidationIssue, ValidationSeverity
+from collections.abc import Sequence
+
+from .base import CategoryNormalizer
+from .contracts import DetectedFile, NormalizedBundle, SourceRole, ValidationIssue, ValidationSeverity
 from .detector import inspect_file
-from .profiles import save_profile
+from .declarative import execute_normalization_spec
+from .profiles import load_normalization_spec, save_profile
 from .registry import get_category_normalizer, list_registered_categories
 from .season_merge import infer_merge_profile_options
+from core.template_ui import normalize_template_package, package_aliases_for_settings
 
 # Register built-in category normalizers.
 from .f1 import normalizer as _f1_normalizer  # noqa: F401
@@ -44,6 +49,55 @@ def _legacy_two_slot_shape(file_config: dict[str, Any]) -> bool:
     )
 
 
+_SOURCE_ROLE_SLOT_IDS: frozenset[str] = frozenset(
+    r.value for r in SourceRole if r != SourceRole.UNKNOWN
+)
+
+# Slot ids under ``inputs.files.<pkg>`` that are not literal SourceRole names can
+# still resolve without ``inputs.file_roles`` via these aliases (values are
+# SourceRole strings). Target *filenames* remain arbitrary operator-chosen names.
+_SLOT_ID_ROLE_ALIASES: dict[str, str] = {
+    "schedule": SourceRole.EVENT_SOURCE.value,
+    "fixtures": SourceRole.EVENT_SOURCE.value,
+    "calendar": SourceRole.EVENT_SOURCE.value,
+    "games": SourceRole.EVENT_SOURCE.value,
+    "stats": SourceRole.METRIC_SOURCE.value,
+    "metrics": SourceRole.METRIC_SOURCE.value,
+    "player_stats": SourceRole.METRIC_SOURCE.value,
+    "roster": SourceRole.ENTITY_SOURCE.value,
+    "entities": SourceRole.ENTITY_SOURCE.value,
+    "reference": SourceRole.REFERENCE_SOURCE.value,
+}
+
+
+def _infer_role_for_slot(slot_id: str) -> str | None:
+    """Map a slot id to a SourceRole string when ``inputs.file_roles`` omits it."""
+
+    sid = str(slot_id).strip()
+    if sid in _SOURCE_ROLE_SLOT_IDS:
+        return sid
+    return _SLOT_ID_ROLE_ALIASES.get(sid.lower())
+
+
+def _merged_file_role_map(
+    settings: Mapping[str, Any],
+    matched_pkg_key: str,
+    file_config: dict[str, Any],
+) -> dict[str, str]:
+    """Explicit ``inputs.file_roles`` entries win; other slots use name/alias inference."""
+
+    explicit = dict(_file_roles_for_package(settings, matched_pkg_key) or {})
+    out: dict[str, str] = {}
+    for slot_id in file_config:
+        sid = str(slot_id).strip()
+        if not sid:
+            continue
+        chosen = (explicit.get(sid) or "").strip() or (_infer_role_for_slot(sid) or "")
+        if chosen:
+            out[sid] = chosen
+    return out
+
+
 def _file_roles_for_package(
     settings: Mapping[str, Any],
     matched_pkg_key: str,
@@ -65,6 +119,23 @@ def _metric_sheet_terms(_settings: Mapping[str, Any]) -> tuple[str, ...]:
     """Optional hook; default picks sheets whose name hints at season."""
 
     return ("2026",)
+
+
+def _normalizer_key_for_package(
+    settings: Mapping[str, Any],
+    category_key: str,
+) -> str:
+    """Resolve the registered normalizer for a package key or one of its aliases."""
+
+    known = {normalize_template_package(k): k for k in list_registered_categories()}
+    direct = normalize_template_package(category_key)
+    if direct in known:
+        return known[direct]
+    for alias in package_aliases_for_settings(settings, category_key):
+        normalized = normalize_template_package(alias)
+        if normalized in known:
+            return known[normalized]
+    return category_key.strip().lower()
 
 
 def resolve_input_scan_jobs(
@@ -97,14 +168,16 @@ def resolve_input_scan_jobs(
         )
         return jobs, issues
 
-    role_map = _file_roles_for_package(settings, matched_pkg_key)
+    role_map = _merged_file_role_map(settings, matched_pkg_key, file_config)
     if not role_map:
         issues.append(
             ValidationIssue(
                 code="missing_file_roles",
                 message=(
-                    f"Package {matched_pkg_key!r} needs inputs.file_roles[{matched_pkg_key!r}] "
-                    "mapping each slot id to a SourceRole (e.g. event_source, metric_source)."
+                    f"Package {matched_pkg_key!r}: could not resolve any slot to a SourceRole. "
+                    "Use slot ids that match roles (event_source, metric_source, …), "
+                    "common aliases (schedule, stats, …), add inputs.file_roles for this package, "
+                    "or use the two-slot layout event_source + metric_source with any filenames."
                 ),
                 severity=ValidationSeverity.ERROR,
             )
@@ -118,8 +191,9 @@ def resolve_input_scan_jobs(
                 ValidationIssue(
                     code="missing_slot_role",
                     message=(
-                        f"No role configured for slot {slot_id!r} under "
-                        f"inputs.file_roles for package {matched_pkg_key!r}."
+                        f"No SourceRole for slot {slot_id!r} under package {matched_pkg_key!r}. "
+                        "Rename the slot to a role or alias (e.g. schedule, metric_source), "
+                        "or set inputs.file_roles for this package."
                     ),
                     severity=ValidationSeverity.ERROR,
                 )
@@ -142,6 +216,31 @@ def resolve_input_scan_jobs(
     return jobs, issues
 
 
+def _resolve_category_normalizer_class(
+    registry_ck: str,
+    detected_files: Sequence[DetectedFile],
+) -> tuple[type[CategoryNormalizer] | None, str | None]:
+    """Resolve a registered normalizer, or fall back for MLB-shaped schedule+stats bundles."""
+
+    try:
+        return get_category_normalizer(registry_ck), None
+    except KeyError:
+        roles = {d.source_role for d in detected_files}
+        if SourceRole.EVENT_SOURCE in roles and SourceRole.METRIC_SOURCE in roles:
+            try:
+                return get_category_normalizer("mlb"), None
+            except KeyError:
+                pass
+        known = ", ".join(list_registered_categories()) or "<none>"
+        return None, (
+            f"No normalizer registered for {registry_ck!r}. Known categories: {known}. "
+            "If your package is schedule + player stats with MLB-like columns, both sources "
+            "must be present and the MLB normalizer runs automatically. For a single calendar "
+            "workbook (e.g. F1-style), set inputs.package_aliases to map your package to `f1`, "
+            "or register a dedicated normalizer for that sport."
+        )
+
+
 def load_normalized_bundle(
     settings: Mapping[str, Any],
     *,
@@ -149,7 +248,7 @@ def load_normalized_bundle(
 ) -> NormalizedBundle:
     """Load, detect, and normalize the configured inputs for one category."""
 
-    registry_ck = category_key.strip().lower()
+    registry_ck = _normalizer_key_for_package(settings, category_key)
     input_dir = Path(settings.get("inputs", {}).get("directory", "inputs"))
     files_root = (settings.get("inputs") or {}).get("files") or {}
     matched_pkg_key, file_config = _match_inputs_package(files_root, category_key)
@@ -220,15 +319,23 @@ def load_normalized_bundle(
     try:
         normalizer_cls = get_category_normalizer(registry_ck)
     except KeyError:
-        known = ", ".join(list_registered_categories()) or "<none>"
+        spec = load_normalization_spec(matched_pkg_key)
+        if spec is not None:
+            bundle = execute_normalization_spec(spec, detected_files, settings)
+            bundle.issues = [*issues, *bundle.issues]
+            return bundle
+        normalizer_cls, norm_err = _resolve_category_normalizer_class(
+            registry_ck, detected_files
+        )
+    else:
+        norm_err = None
+
+    if normalizer_cls is None:
         return NormalizedBundle(
             issues=[
                 ValidationIssue(
                     code="unknown_category_normalizer",
-                    message=(
-                        f"No normalizer registered for {registry_ck!r}. "
-                        f"Known categories: {known}"
-                    ),
+                    message=norm_err or f"No normalizer for {registry_ck!r}",
                     severity=ValidationSeverity.ERROR,
                 )
             ]

@@ -21,13 +21,21 @@ from core.input_slots import (
     iter_input_slots,
     list_input_categories,
     normalize_inputs_files,
+    resolve_inputs_package_file_key,
 )
+from core.parsers.ai_profile_builder import propose_normalization_spec
+from core.parsers.contracts import NormalizationSpec, ValidationIssue, ValidationSeverity
+from core.parsers.declarative import preview_normalization_spec, validate_normalization_spec
+from core.parsers.detector import inspect_file
+from core.parsers.profiles import save_normalization_spec
+from core.parsers.service import resolve_input_scan_jobs
 from core.pipeline import PipelineResult, pipeline_result_to_job_dict, run_pipeline
 from core.template_config.loader import load_template_dir, resolve_templates_directory
 from core.template_config.schema import parse_template_dict
 from core.template_ui import (
     filter_templates_for_package,
     infer_subcategory_for_package,
+    package_aliases_for_settings,
     template_to_ui_dict,
 )
 from core.template_upload import parse_uploaded_template_file
@@ -65,7 +73,8 @@ def _template_meta_for_package(
     tpl_dir = resolve_templates_directory(settings)
     templates = load_template_dir(tpl_dir)
     te = settings.get("templates_enabled") or {}
-    matched = filter_templates_for_package(templates.values(), category_key)
+    aliases = package_aliases_for_settings(settings, category_key)
+    matched = filter_templates_for_package(templates.values(), category_key, aliases)
     template_meta = [
         template_to_ui_dict(t, enabled=bool(te.get(t.id, True)))
         for t in matched
@@ -74,8 +83,63 @@ def _template_meta_for_package(
         templates.values(),
         category_key,
         fallback=str(settings.get("subcategory") or ""),
+        aliases=aliases,
     )
     return template_meta, template_subcategory
+
+
+def _inputs_directory(settings: dict[str, Any]) -> Path:
+    raw = Path(settings.get("inputs", {}).get("directory", "inputs"))
+    return raw if raw.is_absolute() else _ROOT / raw
+
+
+def _issue_to_api(issue: ValidationIssue) -> dict[str, Any]:
+    return {
+        "code": issue.code,
+        "message": issue.message,
+        "severity": issue.severity.value,
+        "file_path": issue.file_path,
+        "source_role": issue.source_role.value if issue.source_role else None,
+        "field_name": issue.field_name,
+        "details": issue.details,
+    }
+
+
+def _detected_files_for_preview(
+    settings: dict[str, Any],
+    category_key: str,
+) -> tuple[list[Any], list[ValidationIssue]]:
+    input_dir = _inputs_directory(settings)
+    file_config = get_files_map_for_category(settings, category_key)
+    jobs, issues = resolve_input_scan_jobs(
+        settings,
+        category_key=category_key,
+        input_dir=input_dir,
+        file_config=file_config,
+        matched_pkg_key=category_key,
+    )
+    detected = []
+    for path, role, sheet_terms in jobs:
+        if not path.is_file():
+            issues.append(
+                ValidationIssue(
+                    code="missing_input_file",
+                    message=f"Missing input file: {path}",
+                    severity=ValidationSeverity.ERROR,
+                    file_path=str(path),
+                    source_role=role,
+                )
+            )
+            continue
+        result = inspect_file(
+            path,
+            category_key=category_key.lower(),
+            preferred_role=role,
+            preferred_sheet_terms=sheet_terms,
+        )
+        issues.extend(result.issues)
+        detected.append(result.detected_file)
+    return detected, issues
 
 
 def create_app() -> Flask:
@@ -137,6 +201,23 @@ def create_app() -> Flask:
             }
         )
 
+    @app.post("/api/input-category")
+    def api_save_input_category() -> Any:
+        """Persist ``inputs.category_key`` when the UI input package changes."""
+
+        if not request.is_json:
+            return jsonify({"error": "Expected application/json"}), 400
+        body = request.get_json(silent=True) or {}
+        raw = str(body.get("category_key") or "").strip()
+        if not raw:
+            return jsonify({"error": "category_key is required"}), 400
+        current = load_settings_disk_only()
+        matched = resolve_inputs_package_file_key(current, raw)
+        if matched is None:
+            return jsonify({"error": f"Unknown input package: {raw!r}"}), 400
+        save_settings_yaml({"inputs": {"category_key": matched}})
+        return jsonify({"ok": True, "category_key": matched})
+
     @app.get("/api/input-slots")
     def api_input_slots() -> Any:
         settings = load_settings()
@@ -156,6 +237,97 @@ def create_app() -> Flask:
                 "template_subcategory": template_subcategory,
             }
         )
+
+    @app.post("/api/normalizer/analyze")
+    def api_analyze_normalizer() -> Any:
+        """Propose and preview a declarative normalizer profile for a package."""
+
+        if not request.is_json:
+            return jsonify({"error": "Expected application/json"}), 400
+        body = request.get_json(silent=True) or {}
+        settings = load_settings()
+        cat = str(body.get("category_key") or get_inputs_category_key(settings)).strip()
+        files_map = get_files_map_for_category(settings, cat)
+        if not files_map:
+            return jsonify({"error": f"No input files configured for package {cat!r}."}), 400
+        input_dir = _inputs_directory(settings)
+        missing = [name for name in files_map.values() if not (input_dir / name).is_file()]
+        if missing:
+            return jsonify({"error": f"Missing uploaded input file(s): {', '.join(missing)}"}), 400
+
+        try:
+            spec, snapshots = propose_normalization_spec(
+                settings,
+                category_key=cat,
+                input_dir=input_dir,
+                file_config=files_map,
+                use_ai=bool(body.get("use_ai", True)),
+            )
+            detected, detect_issues = _detected_files_for_preview(settings, cat)
+            preview = preview_normalization_spec(spec, detected, settings)
+        except Exception as exc:  # noqa: BLE001
+            return jsonify({"error": str(exc)}), 400
+
+        preview["issues"] = [
+            *[_issue_to_api(issue) for issue in detect_issues],
+            *(preview.get("issues") or []),
+        ]
+        return jsonify(
+            {
+                "ok": True,
+                "category_key": cat,
+                "spec": spec.to_dict(),
+                "snapshots": snapshots,
+                "preview": preview,
+                "used_ai": bool(settings.get("openai_api_key") and body.get("use_ai", True)),
+            }
+        )
+
+    @app.post("/api/normalizer/preview")
+    def api_preview_normalizer() -> Any:
+        """Preview a submitted declarative normalizer profile without saving it."""
+
+        if not request.is_json:
+            return jsonify({"error": "Expected application/json"}), 400
+        body = request.get_json(silent=True) or {}
+        settings = load_settings()
+        raw_spec = body.get("spec")
+        if not isinstance(raw_spec, dict):
+            return jsonify({"error": "spec is required"}), 400
+        try:
+            spec = NormalizationSpec.from_dict(raw_spec)
+            detected, detect_issues = _detected_files_for_preview(
+                settings, spec.package_key
+            )
+            preview = preview_normalization_spec(spec, detected, settings)
+        except Exception as exc:  # noqa: BLE001
+            return jsonify({"error": str(exc)}), 400
+        preview["issues"] = [
+            *[_issue_to_api(issue) for issue in detect_issues],
+            *(preview.get("issues") or []),
+        ]
+        return jsonify({"ok": True, "preview": preview})
+
+    @app.post("/api/normalizer/save")
+    def api_save_normalizer() -> Any:
+        """Persist an approved declarative normalizer profile."""
+
+        if not request.is_json:
+            return jsonify({"error": "Expected application/json"}), 400
+        body = request.get_json(silent=True) or {}
+        raw_spec = body.get("spec")
+        if not isinstance(raw_spec, dict):
+            return jsonify({"error": "spec is required"}), 400
+        try:
+            spec = NormalizationSpec.from_dict(raw_spec)
+            issues = validate_normalization_spec(spec)
+            errors = [i for i in issues if i.severity == ValidationSeverity.ERROR]
+            if errors:
+                return jsonify({"error": "; ".join(i.message for i in errors)}), 400
+            path = save_normalization_spec(spec)
+        except Exception as exc:  # noqa: BLE001
+            return jsonify({"error": str(exc)}), 400
+        return jsonify({"ok": True, "path": str(path), "spec": spec.to_dict()})
 
     @app.post("/upload/templates")
     def upload_templates() -> Any:
@@ -221,7 +393,6 @@ def create_app() -> Flask:
                 "ok": len(saved) > 0,
                 "saved": saved,
                 "errors": errors,
-                "reload": True,
             }
         )
 
@@ -381,8 +552,8 @@ def _build_settings_updates_from_payload(payload: dict[str, Any]) -> dict[str, A
 
     updates: dict[str, Any] = {}
 
-    if "category_id" in payload:
-        updates["category_id"] = str(payload.get("category_id") or "")
+    if "topic_import_id" in payload:
+        updates["topic_import_id"] = str(payload.get("topic_import_id") or "")
 
     if "subcategory" in payload:
         updates["subcategory"] = str(payload.get("subcategory") or "MLB")

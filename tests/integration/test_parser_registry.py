@@ -15,6 +15,56 @@ def test_registered_verticals_include_mlb_and_f1() -> None:
 
 
 @pytest.mark.integration
-def test_get_category_normalizer_lowercase_keys() -> None:
-    assert get_category_normalizer("mlb").__name__ == "MlbCategoryNormalizer"
-    assert get_category_normalizer("f1").__name__ == "F1CategoryNormalizer"
+def test_unknown_package_dual_source_loads_via_mlb_normalizer(tmp_path: Path) -> None:
+    """New packages (e.g. MLS) without a dedicated normalizer use MLB-shaped pipeline."""
+
+    from core.parsers.contracts import ValidationSeverity
+    from core.parsers.service import load_normalized_bundle
+    from tests.fixtures.workbooks import write_mlb_schedule_minimal, write_mlb_stats_minimal
+
+    pkg = "ZZZ_UnknownIntegrationPkg"
+
+    write_mlb_schedule_minimal(tmp_path / "sched.xlsx")
+    write_mlb_stats_minimal(tmp_path / "st.xlsx")
+    settings: dict = {
+        "inputs": {
+            "directory": str(tmp_path),
+            "category_key": pkg,
+            "files": {
+                pkg: {
+                    "event_source": "sched.xlsx",
+                    "metric_source": "st.xlsx",
+                }
+            },
+        },
+        "date_filter": {"start": "2020-01-01", "end": "2030-12-31"},
+        "parsing": {"persist_profiles": False},
+    }
+    bundle = load_normalized_bundle(settings, category_key=pkg)
+    errors = [i for i in bundle.issues if i.severity == ValidationSeverity.ERROR]
+    assert not errors
+    assert len(bundle.events) >= 1
+
+
+@pytest.mark.integration
+def test_unknown_package_schedule_only_still_requires_alias_or_normalizer(
+    tmp_path: Path,
+) -> None:
+    from core.parsers.contracts import ValidationSeverity
+    from core.parsers.service import load_normalized_bundle
+    from tests.fixtures.workbooks import write_mlb_schedule_minimal
+
+    pkg = "ZZZ_UnknownIntegrationPkg"
+
+    write_mlb_schedule_minimal(tmp_path / "sched.xlsx")
+    settings: dict = {
+        "inputs": {
+            "directory": str(tmp_path),
+            "category_key": pkg,
+            "files": {pkg: {"event_source": "sched.xlsx"}},
+        },
+        "parsing": {"persist_profiles": False},
+    }
+    bundle = load_normalized_bundle(settings, category_key=pkg)
+    codes = {i.code for i in bundle.issues if i.severity == ValidationSeverity.ERROR}
+    assert "unknown_category_normalizer" in codes

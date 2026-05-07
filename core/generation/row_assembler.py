@@ -19,8 +19,10 @@ from .prompt_builder import GeneratedQuestion, PromptItem
 
 logger = logging.getLogger(__name__)
 
+TOPIC_IMPORT_ID_REQUIRED_MESSAGE = "topic_import_id is required in config but was not set"
+
 OUTPUT_COLUMNS: list[str] = [
-    "category_id",
+    "topic_import_id",
     "subcategory",
     "event",
     "question",
@@ -29,7 +31,7 @@ OUTPUT_COLUMNS: list[str] = [
     "start_date",
     "expiration_date",
     "resolution_date",
-    "priority_flag",
+    "priority",
 ]
 
 
@@ -37,7 +39,7 @@ OUTPUT_COLUMNS: list[str] = [
 class OutputRow:
     """One upload-ready row conforming to the client CSV schema."""
 
-    category_id: str
+    topic_import_id: str
     subcategory: str
     event: str
     question: str
@@ -46,9 +48,9 @@ class OutputRow:
     start_date: str
     expiration_date: str
     resolution_date: str
-    priority_flag: str
+    priority: int | str
 
-    def to_dict(self) -> dict[str, str]:
+    def to_dict(self) -> dict[str, Any]:
         """Return an ordered dict matching :data:`OUTPUT_COLUMNS`."""
         d = asdict(self)
         return {col: d[col] for col in OUTPUT_COLUMNS}
@@ -66,6 +68,22 @@ def build_event_string(event: NormalizedEvent) -> str:
     return f"{event.away_team} vs {event.home_team}"
 
 
+def resolve_topic_import_id(settings: dict[str, Any], category_key: str | None = None) -> str:
+    """Return the topic import ID for the selected package, or raise if missing."""
+
+    pkg = (category_key if category_key is not None else get_inputs_category_key(settings)).strip().lower()
+    topic_ids = settings.get("topic_import_ids")
+    if isinstance(topic_ids, dict) and pkg in topic_ids:
+        value = topic_ids.get(pkg)
+    else:
+        value = settings.get("topic_import_id", "")
+
+    topic_import_id = str(value).strip() if value is not None else ""
+    if not topic_import_id:
+        raise ValueError(TOPIC_IMPORT_ID_REQUIRED_MESSAGE)
+    return topic_import_id
+
+
 class RowAssembler:
     """Assembles complete output rows from generated questions.
 
@@ -73,21 +91,16 @@ class RowAssembler:
     ----------
     settings:
         Global settings dict (from ``load_settings``).  Used for
-        ``category_id`` and passed through to the date rule engine.
+        ``topic_import_id`` and passed through to the date rule engine.
     """
 
-    def __init__(self, settings: dict[str, Any]) -> None:
+    def __init__(self, settings: dict[str, Any], category_key: str | None = None) -> None:
         self.settings = settings
-        self.category_id: str = str(settings.get("category_id", ""))
+        self.category_key = category_key
+        self.topic_import_id: str = str(settings.get("topic_import_id", ""))
 
-    def _resolved_category_id(self) -> str:
-        pkg = get_inputs_category_key(self.settings).strip().lower()
-        cats = self.settings.get("category_ids")
-        if isinstance(cats, dict):
-            hit = cats.get(pkg)
-            if hit is not None and str(hit).strip():
-                return str(hit).strip()
-        return str(self.settings.get("category_id", ""))
+    def _resolved_topic_import_id(self) -> str:
+        return resolve_topic_import_id(self.settings, self.category_key)
 
     def assemble(
         self,
@@ -105,7 +118,7 @@ class RowAssembler:
         )
 
         return OutputRow(
-            category_id=self._resolved_category_id(),
+            topic_import_id=self._resolved_topic_import_id(),
             subcategory=template.subcategory,
             event=build_event_string(event),
             question=generated.question,
@@ -114,7 +127,7 @@ class RowAssembler:
             start_date=dates.start_date,
             expiration_date=dates.expiration_date,
             resolution_date=dates.resolution_date,
-            priority_flag=template.priority,
+            priority=template.priority,
         )
 
     def assemble_batch(

@@ -7,6 +7,54 @@ from pathlib import Path
 import pandas as pd
 
 
+def write_mlb_schedule_minimal(
+    path: Path,
+    *,
+    rows: list[dict[str, object]] | None = None,
+) -> Path:
+    """Minimal MLB schedule workbook detected without local client inputs."""
+
+    data = rows or [
+        {
+            "event_id": "MLBTEST001",
+            "event_date": "2026-05-15",
+            "event_time": "21:40:00",
+            "home_team": "Athletics",
+            "away_team": "Giants",
+        },
+        {
+            "event_id": "MLBTEST002",
+            "event_date": "2026-05-16",
+            "event_time": "19:05:00",
+            "home_team": "New York Yankees",
+            "away_team": "New York Mets",
+        },
+    ]
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with pd.ExcelWriter(path) as writer:
+        pd.DataFrame(data).to_excel(writer, sheet_name="MLB Schedule", index=False)
+    return path
+
+
+def write_mlb_stats_minimal(
+    path: Path,
+    *,
+    rows: list[dict[str, object]] | None = None,
+) -> Path:
+    """Minimal MLB stats workbook with teams matching ``write_mlb_schedule_minimal``."""
+
+    data = rows or [
+        {"Player": "Athletics Slugger", "Team": "ATH", "HR": 12, "RBI": 44, "SB": 3, "WAR": 2.1},
+        {"Player": "Giants Slugger", "Team": "SFG", "HR": 15, "RBI": 48, "SB": 2, "WAR": 2.4},
+        {"Player": "Yankees Slugger", "Team": "NYY", "HR": 31, "RBI": 88, "SB": 5, "WAR": 5.0},
+        {"Player": "Mets Slugger", "Team": "NYM", "HR": 28, "RBI": 79, "SB": 1, "WAR": 4.3},
+    ]
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with pd.ExcelWriter(path) as writer:
+        pd.DataFrame(data).to_excel(writer, sheet_name="2026 MLB Statistics", index=False)
+    return path
+
+
 def write_f1_schedule_minimal(path: Path) -> Path:
     """Minimal F1 Schedule workbook matching ``f1__event-source__f1_schedule.yaml`` columns."""
 

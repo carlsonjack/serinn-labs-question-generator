@@ -5,7 +5,7 @@
   "question": "Who is more likely to steal a base?",
   "answer_type": "multiple_choice",
   "answer_options": "{entity_options}",
-  "priority": "false",
+  "priority": "",
   "requires_entities": true,
   "stat_column": "SB",
   "top_n_per_team": 2

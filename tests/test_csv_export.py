@@ -17,9 +17,9 @@ from core.csv_export import (
 from core.generation.row_assembler import OUTPUT_COLUMNS, OutputRow
 
 
-def _make_row(**overrides: str) -> OutputRow:
+def _make_row(**overrides: object) -> OutputRow:
     defaults = {
-        "category_id": "cat_001",
+        "topic_import_id": "mlb-regular-season",
         "subcategory": "MLB",
         "event": "Mets vs Yankees",
         "question": "Who will win?",
@@ -28,7 +28,7 @@ def _make_row(**overrides: str) -> OutputRow:
         "start_date": "2026-05-14T21:40:00",
         "expiration_date": "2026-05-15T21:40:00",
         "resolution_date": "2026-05-16T01:40:00",
-        "priority_flag": "true",
+        "priority": 1,
     }
     defaults.update(overrides)
     return OutputRow(**defaults)
@@ -109,7 +109,18 @@ class TestWriteGeneratedCsv:
         write_generated_csv([_make_row()], out)
         with out.open(encoding=CSV_WRITE_ENCODING) as fh:
             reader = csv.DictReader(fh)
-            assert list(reader.fieldnames) == OUTPUT_COLUMNS
+            assert list(reader.fieldnames) == [
+                "topic_import_id",
+                "subcategory",
+                "event",
+                "question",
+                "answer_type",
+                "answer_options",
+                "start_date",
+                "expiration_date",
+                "resolution_date",
+                "priority",
+            ]
 
     def test_row_values(self, tmp_path: Path) -> None:
         out = tmp_path / "out.csv"

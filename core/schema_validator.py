@@ -19,11 +19,10 @@ from core.generation.row_assembler import OUTPUT_COLUMNS, OutputRow
 
 logger = logging.getLogger(__name__)
 
-REQUIRED_FIELDS: list[str] = list(OUTPUT_COLUMNS)
-"""Every column in the output schema is required (must be non-empty)."""
+REQUIRED_FIELDS: list[str] = [col for col in OUTPUT_COLUMNS if col != "priority"]
+"""Columns in the output schema that must be non-empty."""
 
 VALID_ANSWER_TYPES: frozenset[str] = frozenset({"yes_no", "multiple_choice"})
-VALID_PRIORITY_FLAGS: frozenset[str] = frozenset({"true", "false"})
 DATE_FIELDS: list[str] = ["start_date", "expiration_date", "resolution_date"]
 
 
@@ -93,13 +92,23 @@ def validate_row(row: OutputRow) -> list[str]:
                 f"Invalid ISO 8601 date in {date_col}: {date_val!r}"
             )
 
-    if row.priority_flag not in VALID_PRIORITY_FLAGS:
-        reasons.append(
-            f"Invalid priority_flag: {row.priority_flag!r} "
-            f"(expected one of {sorted(VALID_PRIORITY_FLAGS)})"
-        )
+    priority_reason = _validate_priority(row.priority)
+    if priority_reason is not None:
+        reasons.append(priority_reason)
 
     return reasons
+
+
+def _validate_priority(value: Any) -> str | None:
+    if value == "":
+        return None
+    if isinstance(value, bool):
+        return "Invalid priority: priority must be an integer or blank"
+    if isinstance(value, int):
+        if value >= 0:
+            return None
+        return "Invalid priority: priority must be a non-negative integer or blank"
+    return "Invalid priority: priority must be an integer or blank"
 
 
 def validate_rows(rows: Sequence[OutputRow]) -> ValidationResult:

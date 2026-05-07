@@ -60,7 +60,7 @@ def _game_winner_template() -> QuestionTemplate:
         question="Who will win {home_team} vs {away_team}?",
         answer_type="multiple_choice",
         answer_options="{home_team}||{away_team}",
-        priority="true",
+        priority=1,
         requires_entities=False,
     )
 
