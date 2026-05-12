@@ -94,7 +94,7 @@ class DetectedFile:
 
 @dataclass
 class NormalizedEvent:
-    """Canonical event record consumed by downstream epics."""
+    """Canonical scheduled content unit consumed by existing event templates."""
 
     event_id: str
     home_team: str
@@ -106,8 +106,20 @@ class NormalizedEvent:
 
 
 @dataclass
+class ContentEntity:
+    """Canonical entity/watchlist record for non-matchup verticals."""
+
+    entity_id: str
+    display_name: str
+    source_role: SourceRole = SourceRole.ENTITY_SOURCE
+    entity_type: str = "entity"
+    topic_import_id: str | None = None
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass
 class PlayerStatRecord:
-    """Canonical player metric record for entity-based templates."""
+    """Canonical sports metric record for entity-stat templates."""
 
     player_name: str
     team: str
@@ -133,6 +145,7 @@ class NormalizedBundle:
     """All normalized parser outputs needed by downstream stages."""
 
     events: list[NormalizedEvent] = field(default_factory=list)
+    entities: list[ContentEntity] = field(default_factory=list)
     player_stats: list[PlayerStatRecord] = field(default_factory=list)
     issues: list[ValidationIssue] = field(default_factory=list)
     profiles: list[InputProfile] = field(default_factory=list)

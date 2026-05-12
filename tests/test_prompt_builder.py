@@ -235,7 +235,7 @@ class TestPromptTemplateEvalInvariants:
         item = PromptItem(template=_entity_template(), event=_event(), players=_players())
         user_msg = PromptBuilder().build_prompt([item])[1]["content"]
 
-        assert "Players (use ONLY these as answer options): Aaron Judge, Pete Alonso" in user_msg
+        assert "Entities (use ONLY these as answer options): Aaron Judge, Pete Alonso" in user_msg
         assert "{entity_options}" not in user_msg
         assert "Stat: HR" in user_msg
 
@@ -401,7 +401,7 @@ class TestSystemPromptContract:
 
     def test_entity_exact_match(self):
         sys = self._system()
-        assert "ONLY the player names" in sys
+        assert "ONLY the entity names" in sys
 
 
 # ---------------------------------------------------------------------------

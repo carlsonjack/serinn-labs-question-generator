@@ -37,6 +37,10 @@ FIELD_ALIASES: dict[str, set[str]] = {
     "away_team": {"away team", "away_team", "away"},
     "player_name": {"player", "player name", "name", "batter"},
     "team": {"team", "club"},
+    "company_name": {"company name", "company", "asset", "asset name"},
+    "ticker": {"ticker", "symbol", "stock ticker"},
+    "topic_import_id": {"topic import id", "topic_import_id"},
+    "topic_name": {"topic name", "topic_name"},
     "league": {"lg", "league"},
     "war": {"war"},
     "hr": {"hr", "home runs"},
@@ -224,6 +228,8 @@ def _infer_source_role(mappings: dict[str, str]) -> SourceRole:
         return SourceRole.EVENT_SOURCE
     if {"player_name", "team"} <= mappings.keys():
         return SourceRole.METRIC_SOURCE
+    if {"company_name", "ticker"} <= mappings.keys():
+        return SourceRole.ENTITY_SOURCE
     if "team" in mappings:
         return SourceRole.ENTITY_SOURCE
     return SourceRole.UNKNOWN

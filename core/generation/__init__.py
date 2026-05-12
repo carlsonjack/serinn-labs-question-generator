@@ -15,6 +15,7 @@ from .row_assembler import (
     build_event_string,
     resolve_topic_import_id,
 )
+from .stocks import STOCK_OUTPUT_COLUMNS, StockPlanner, StockQuestionRow
 from .token_tracker import (
     RunCostSummary,
     TokenUsage,
@@ -42,6 +43,9 @@ __all__ = [
     "PromptItem",
     "RowAssembler",
     "RunCostSummary",
+    "STOCK_OUTPUT_COLUMNS",
+    "StockPlanner",
+    "StockQuestionRow",
     "resolve_topic_import_id",
     "TokenUsage",
 ]

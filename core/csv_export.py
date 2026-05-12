@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 from core.generation.row_assembler import OUTPUT_COLUMNS, OutputRow
+from core.generation.stocks import STOCK_OUTPUT_COLUMNS, StockQuestionRow
 
 logger = logging.getLogger(__name__)
 
@@ -84,6 +85,23 @@ def write_generated_csv(
     return out
 
 
+def write_stock_import_csv(
+    rows: Sequence[StockQuestionRow],
+    path: str | Path,
+) -> Path:
+    """Write stock MVP rows using the client's titled import columns."""
+
+    out = Path(path)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    with out.open("w", newline="", encoding=CSV_WRITE_ENCODING) as fh:
+        writer = csv.DictWriter(fh, fieldnames=STOCK_OUTPUT_COLUMNS)
+        writer.writeheader()
+        for row in rows:
+            writer.writerow(row.to_import_dict())
+    logger.info("Wrote %d stock row(s) to %s", len(rows), out)
+    return out
+
+
 def write_generated_csv_auto(
     rows: Sequence[OutputRow],
     *,
@@ -103,3 +121,24 @@ def write_generated_csv_auto(
         now=now,
     )
     return write_generated_csv(rows, path)
+
+
+def write_stock_import_csv_auto(
+    rows: Sequence[StockQuestionRow],
+    *,
+    date_filter: Mapping[str, Any],
+    output_dir: Path | str | None = None,
+    now: datetime | None = None,
+) -> Path:
+    """Build a stock-specific output path and write the client import CSV."""
+
+    start = str(date_filter["start"])
+    end = str(date_filter["end"])
+    path = build_generated_csv_path(
+        "stocks",
+        start,
+        end,
+        output_dir=output_dir,
+        now=now,
+    )
+    return write_stock_import_csv(rows, path)

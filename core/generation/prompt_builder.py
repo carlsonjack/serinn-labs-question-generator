@@ -78,7 +78,7 @@ class GeneratedQuestionBatch(BaseModel):
 # ---------------------------------------------------------------------------
 
 _SYSTEM_PROMPT = """\
-You are a structured content generator for a sports prediction platform.
+You are a structured content generator for a prediction content platform.
 
 MODE: {generation_mode}
 
@@ -96,14 +96,14 @@ question objects — one per input item.
    - "question"     — polished, natural-sounding question text
    - "answer_options" — pipe-delimited string (e.g. "Mets||Yankees")
 3. Do NOT invent question types or add questions beyond what is requested.
-4. Do NOT hallucinate or fabricate player names, team names, or statistics.
+4. Do NOT hallucinate or fabricate entity names, participant names, or statistics.
 5. For yes/no questions, answer_options must be exactly "Yes||No".
-6. For multiple-choice event questions, use the team names as provided.
-7. For entity/player questions, use ONLY the player names from the \
-provided list — do not reorder, rename, or add players.
+6. For multiple-choice event questions, use the provided answer option labels.
+7. For entity questions, use ONLY the entity names from the \
+provided list — do not reorder, rename, or add entities.
 8. Make question text grammatically correct and natural-sounding. You may \
 rephrase the template for clarity and flow but must not change meaning.
-9. Include event context (teams / matchup) in entity questions so each \
+9. Include event context in entity questions so each \
 question stands alone without external context.\
 """
 
@@ -178,7 +178,7 @@ class PromptBuilder:
 
         lines.append(f"Template ID: {tpl.id}")
         lines.append(f"Event ID: {event.event_id}")
-        lines.append(f"Matchup: {event.home_team} vs {event.away_team}")
+        lines.append(f"Content unit: {event.event_display or f'{event.home_team} vs {event.away_team}'}")
         lines.append(f"Event datetime: {event.event_datetime}")
         lines.append(f"Subcategory: {event.subcategory}")
 
@@ -199,10 +199,7 @@ class PromptBuilder:
                     f"none provided for event {event.event_id}"
                 )
             player_names = [p.player_name for p in item.players]
-            lines.append(
-                f"Players (use ONLY these as answer options): "
-                f"{', '.join(player_names)}"
-            )
+            lines.append(f"Entities (use ONLY these as answer options): {', '.join(player_names)}")
             lines.append(f"Stat: {tpl.stat_column}")
 
         lines.append("")

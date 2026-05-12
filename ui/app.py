@@ -23,7 +23,7 @@ from core.input_slots import (
     normalize_inputs_files,
     resolve_inputs_package_file_key,
 )
-from core.parsers.ai_profile_builder import propose_normalization_spec
+from core.parsers.ai_profile_builder import propose_normalization_spec, uses_ai_normalization
 from core.parsers.contracts import NormalizationSpec, ValidationIssue, ValidationSeverity
 from core.parsers.declarative import preview_normalization_spec, validate_normalization_spec
 from core.parsers.detector import inspect_file
@@ -39,6 +39,7 @@ from core.template_ui import (
     template_to_ui_dict,
 )
 from core.template_upload import parse_uploaded_template_file
+from core.topic_import_catalog import append_topic_import_id_to_catalog, load_topic_import_ids_catalog
 
 _ROOT = Path(__file__).resolve().parent.parent
 _LOCK = threading.Lock()
@@ -168,6 +169,7 @@ def create_app() -> Flask:
             input_slots=input_slots,
             inputs_files_map=files_root,
             template_subcategory=template_subcategory,
+            topic_import_ids_catalog=load_topic_import_ids_catalog(),
         )
 
     @app.post("/api/inputs-files")
@@ -218,6 +220,21 @@ def create_app() -> Flask:
         save_settings_yaml({"inputs": {"category_key": matched}})
         return jsonify({"ok": True, "category_key": matched})
 
+    @app.post("/api/topic-import-ids/catalog")
+    def api_append_topic_import_id_catalog() -> Any:
+        """Append a custom topic import ID to ``config/topic_import_ids_catalog.json``."""
+
+        if not request.is_json:
+            return jsonify({"error": "Expected application/json"}), 400
+        body = request.get_json(silent=True) or {}
+        topic_id = str(body.get("topic_import_id") or body.get("id") or "").strip()
+        label = str(body.get("label") or "").strip()
+        try:
+            result = append_topic_import_id_to_catalog(topic_id, label=label)
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+        return jsonify(result)
+
     @app.get("/api/input-slots")
     def api_input_slots() -> Any:
         settings = load_settings()
@@ -256,12 +273,13 @@ def create_app() -> Flask:
             return jsonify({"error": f"Missing uploaded input file(s): {', '.join(missing)}"}), 400
 
         try:
+            requested_ai = bool(body.get("use_ai", True))
             spec, snapshots = propose_normalization_spec(
                 settings,
                 category_key=cat,
                 input_dir=input_dir,
                 file_config=files_map,
-                use_ai=bool(body.get("use_ai", True)),
+                use_ai=requested_ai,
             )
             detected, detect_issues = _detected_files_for_preview(settings, cat)
             preview = preview_normalization_spec(spec, detected, settings)
@@ -279,7 +297,11 @@ def create_app() -> Flask:
                 "spec": spec.to_dict(),
                 "snapshots": snapshots,
                 "preview": preview,
-                "used_ai": bool(settings.get("openai_api_key") and body.get("use_ai", True)),
+                "used_ai": uses_ai_normalization(
+                    settings,
+                    category_key=cat,
+                    requested=requested_ai,
+                ),
             }
         )
 

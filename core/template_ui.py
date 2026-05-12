@@ -97,7 +97,7 @@ def infer_subcategory_for_package(
         return raw
     pkg = (package_key or "").strip()
     if not pkg:
-        return "MLB"
+        return "Content"
     if "_" in pkg or "-" in pkg:
         return pkg.replace("-", " ").replace("_", " ").title()
     if len(pkg) <= 4:
@@ -126,15 +126,15 @@ def explain_template(t: QuestionTemplate) -> list[str]:
     lines: list[str] = []
     if t.question_family == "event":
         lines.append(
-            "One output row per scheduled game in your date window for each enabled "
-            "event-style template. Teams, dates, and answer options are taken from "
-            "your schedule; the model only polishes the question wording."
+            "One output row per scheduled content unit in your date window for each "
+            "enabled event-style template. Dates and answer options are taken from "
+            "your inputs; the model only polishes the question wording."
         )
         if t.answer_type == "yes_no":
             lines.append('Answers are fixed to "Yes" / "No".')
         else:
             lines.append(
-                "Answer options are built from the matchup (e.g. home vs away), not invented by the model."
+                "Answer options are built from the input data, not invented by the model."
             )
         if t.line is not None:
             lines.append(
@@ -143,14 +143,13 @@ def explain_template(t: QuestionTemplate) -> list[str]:
             )
     else:
         lines.append(
-            "One output row per game that has enough player stats. Answer choices "
-            "are only players returned from your stats file for that game’s teams — "
-            "the model does not invent names."
+            "One output row per content unit that has enough entity metrics. Answer choices "
+            "are only entities returned from your input files — the model does not invent names."
         )
         if t.stat_column:
             lines.append(
-                f"Players are ranked by the `{t.stat_column}` column in stats; "
-                f"top {t.top_n_per_team or '?'} per team are offered as options."
+                f"Entities are ranked by the `{t.stat_column}` column in metrics; "
+                f"top {t.top_n_per_team or '?'} per side are offered as options."
             )
 
     if t._comment:

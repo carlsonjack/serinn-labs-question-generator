@@ -19,6 +19,7 @@ from core.template_ui import normalize_template_package, package_aliases_for_set
 # Register built-in category normalizers.
 from .f1 import normalizer as _f1_normalizer  # noqa: F401
 from .mlb import normalizer as _mlb_normalizer  # noqa: F401
+from .stocks import normalizer as _stocks_normalizer  # noqa: F401
 
 
 def _match_inputs_package(
@@ -66,6 +67,12 @@ _SLOT_ID_ROLE_ALIASES: dict[str, str] = {
     "player_stats": SourceRole.METRIC_SOURCE.value,
     "roster": SourceRole.ENTITY_SOURCE.value,
     "entities": SourceRole.ENTITY_SOURCE.value,
+    "entity_source": SourceRole.ENTITY_SOURCE.value,
+    "asset_source": SourceRole.ENTITY_SOURCE.value,
+    "assets": SourceRole.ENTITY_SOURCE.value,
+    "watchlist": SourceRole.ENTITY_SOURCE.value,
+    "stock_list": SourceRole.ENTITY_SOURCE.value,
+    "stocks": SourceRole.ENTITY_SOURCE.value,
     "reference": SourceRole.REFERENCE_SOURCE.value,
 }
 
@@ -93,6 +100,8 @@ def _merged_file_role_map(
         if not sid:
             continue
         chosen = (explicit.get(sid) or "").strip() or (_infer_role_for_slot(sid) or "")
+        if normalize_template_package(matched_pkg_key) == "stocks" and sid.lower() == "metric_source":
+            chosen = SourceRole.ENTITY_SOURCE.value
         if chosen:
             out[sid] = chosen
     return out

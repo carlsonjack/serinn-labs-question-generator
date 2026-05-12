@@ -2,6 +2,7 @@
 
 from .base import CategoryNormalizer, InputParser
 from .contracts import (
+    ContentEntity,
     DetectedFile,
     InputProfile,
     NormalizedBundle,
@@ -21,6 +22,7 @@ from .service import load_normalized_bundle
 
 __all__ = [
     "CategoryNormalizer",
+    "ContentEntity",
     "DetectedFile",
     "InputParser",
     "InputProfile",

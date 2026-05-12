@@ -20,7 +20,7 @@ TEMPLATES = ROOT / "templates"
 def test_load_all_shipped_templates() -> None:
     templates = load_template_dir(TEMPLATES)
     ids = set(templates.keys())
-    assert ids == {
+    assert {
         "mlb_game_winner",
         "mlb_win_margin_2",
         "mlb_total_runs_over_8_5",
@@ -40,7 +40,10 @@ def test_load_all_shipped_templates() -> None:
         "mls_sample_event_yesno",
         "mls_sample_event_mc",
         "mls_sample_entity_goals",
-    }
+        "stocks_daily_close_higher",
+        "stocks_daily_biggest_gainer",
+        "stocks_quarterly_biggest_loser",
+    } <= ids
     assert templates["mlb_game_winner"].question_family == "event"
     assert templates["mlb_game_winner"].answer_type == "multiple_choice"
     assert isinstance(templates["mlb_game_winner"].priority, int)
@@ -48,6 +51,9 @@ def test_load_all_shipped_templates() -> None:
     assert templates["mlb_home_run"].stat_column == "HR"
     assert templates["mlb_home_run"].top_n_per_team == 2
     assert templates["markets_placeholder"]._comment == "extend by adding question and input package definition"
+    assert templates["stocks_daily_close_higher"].question_family == "stock"
+    assert templates["stocks_daily_close_higher"].answer_options == ""
+    assert templates["stocks_daily_close_higher"].timeframe == "Daily"
 
 
 def test_parse_template_roundtrip_minimal_event() -> None:

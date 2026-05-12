@@ -11,6 +11,7 @@ import pytest
 
 from core.pipeline import PipelineResult
 from core.template_config.schema import QuestionTemplate
+from tests.fixtures.workbooks import write_stock_list_minimal
 import ui.app as ui_app
 from ui.app import create_app
 
@@ -62,6 +63,89 @@ def test_api_save_input_category_persists_canonical_key(client, tmp_path, monkey
 
     data = load_settings_disk_only()
     assert data["inputs"]["category_key"] == "MLS"
+
+
+def test_load_topic_import_ids_catalog_normalizes_entries(tmp_path):
+    catalog = tmp_path / "topic_import_ids_catalog.json"
+    catalog.write_text(
+        json.dumps(
+            [
+                "mlb-mlb-season-2026",
+                {"id": " nba-nba-season-2025-2026 ", "label": " NBA Season "},
+                {"id": "", "label": "ignored"},
+                {"label": "missing id"},
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    assert ui_app.load_topic_import_ids_catalog(catalog) == [
+        {"id": "mlb-mlb-season-2026", "label": ""},
+        {"id": "nba-nba-season-2025-2026", "label": "NBA Season"},
+    ]
+
+
+def test_load_topic_import_ids_catalog_missing_file_returns_empty(tmp_path):
+    assert ui_app.load_topic_import_ids_catalog(tmp_path / "missing.json") == []
+
+
+def test_topic_import_ids_catalog_file_is_sorted_and_nonempty():
+    catalog = ui_app.load_topic_import_ids_catalog()
+    ids = [entry["id"] for entry in catalog]
+
+    assert ids
+    assert ids == sorted(ids)
+    assert all(entry["id"] for entry in catalog)
+
+
+def test_index_renders_topic_import_id_combobox(client, tmp_path, monkeypatch):
+    settings = {
+        "topic_import_id": "mlb-mlb-season-2026",
+        "subcategory": "MLB",
+        "top_n_per_team": 3,
+        "date_filter": {"start": "2026-01-01", "end": "2026-02-01"},
+        "templates_enabled": {},
+        "inputs": {
+            "directory": "inputs",
+            "category_key": "mlb",
+            "files": {"mlb": {}},
+        },
+    }
+
+    monkeypatch.setattr("ui.app.load_settings", lambda: settings)
+    monkeypatch.setattr("ui.app.resolve_templates_directory", lambda _s: tmp_path)
+    monkeypatch.setattr(
+        "ui.app.load_topic_import_ids_catalog",
+        lambda: [{"id": "mlb-mlb-season-2026", "label": "MLB | MLB | MLB Season 2026"}],
+    )
+
+    rv = client.get("/")
+
+    assert rv.status_code == 200
+    assert b'id="topic_import_id"' in rv.data
+    assert b'role="combobox"' in rv.data
+    assert b"mlb-mlb-season-2026" in rv.data
+    assert b"btn-save-topic-import-catalog" in rv.data
+
+
+def test_api_append_topic_import_id_catalog(client, tmp_path, monkeypatch):
+    cat = tmp_path / "topic_import_ids_catalog.json"
+    cat.write_text(json.dumps([{"id": "existing-id", "label": ""}]), encoding="utf-8")
+    monkeypatch.setattr("core.topic_import_catalog.TOPIC_IMPORT_IDS_CATALOG_PATH", cat)
+
+    bad = client.post("/api/topic-import-ids/catalog", json={})
+    assert bad.status_code == 400
+
+    dup = client.post("/api/topic-import-ids/catalog", json={"topic_import_id": "EXISTING-ID"})
+    assert dup.status_code == 200
+    assert dup.get_json()["already_exists"] is True
+
+    ok = client.post("/api/topic-import-ids/catalog", json={"topic_import_id": "new-custom-id"})
+    assert ok.status_code == 200
+    j = ok.get_json()
+    assert j["added"] is True
+    data = json.loads(cat.read_text(encoding="utf-8"))
+    assert any(e["id"] == "new-custom-id" for e in data)
 
 
 def test_download_rejects_traversal(client):
@@ -267,6 +351,36 @@ def test_api_input_slots_returns_package_filtered_templates(client, tmp_path, mo
     assert data["category_key"] == "mlb"
     assert [x["id"] for x in data["template_meta"]] == ["mlb_a"]
     assert data["template_subcategory"] == "MLB"
+
+
+def test_api_normalizer_analyze_stocks_returns_entity_preview(client, tmp_path, monkeypatch):
+    inputs_dir = tmp_path / "inputs"
+    write_stock_list_minimal(inputs_dir / "stocks.csv")
+    settings = {
+        "openai_api_key": "sk-test",
+        "inputs": {
+            "directory": str(inputs_dir),
+            "category_key": "stocks",
+            "files": {"stocks": {"metric_source": "stocks.csv"}},
+            "file_roles": {"stocks": {"metric_source": "entity_source"}},
+        },
+    }
+
+    monkeypatch.setattr("ui.app.load_settings", lambda: settings)
+
+    rv = client.post(
+        "/api/normalizer/analyze",
+        json={"category_key": "stocks", "use_ai": True},
+    )
+
+    assert rv.status_code == 200
+    data = rv.get_json()
+    assert data["used_ai"] is False
+    assert data["spec"]["sources"]["metric_source"]["source_role"] == "entity_source"
+    assert data["preview"]["event_count"] == 0
+    assert data["preview"]["player_stat_count"] == 0
+    assert data["preview"]["entity_count"] == 6
+    assert data["preview"]["entities"][0]["display_name"] == "Apple Inc. (AAPL)"
 
 
 def test_ui_handoff_package_alias_upload_and_run(client, tmp_path, monkeypatch):

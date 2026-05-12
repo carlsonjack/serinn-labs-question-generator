@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any, Sequence
 
 from core.csv_export import CSV_WRITE_ENCODING
+from core.generation.stocks import StockQuestionRow
 from core.generation.row_assembler import OUTPUT_COLUMNS, OutputRow
 
 logger = logging.getLogger(__name__)
@@ -56,17 +57,21 @@ class ValidationResult:
 
 def _is_valid_iso8601(value: str) -> bool:
     """Return True if *value* parses as a valid ISO 8601 datetime string."""
+    return _parse_iso8601(value) is not None
+
+
+def _parse_iso8601(value: str) -> datetime | None:
+    """Return a parsed ISO 8601 datetime, or ``None`` when invalid."""
+
     for fmt in ("%Y-%m-%dT%H:%M:%S", "%Y-%m-%d", "%Y-%m-%dT%H:%M:%S%z"):
         try:
-            datetime.strptime(value, fmt)
-            return True
+            return datetime.strptime(value, fmt)
         except ValueError:
             continue
     try:
-        datetime.fromisoformat(value)
-        return True
+        return datetime.fromisoformat(value)
     except (ValueError, TypeError):
-        return False
+        return None
 
 
 def validate_row(row: OutputRow) -> list[str]:
@@ -148,6 +153,45 @@ def validate_rows(rows: Sequence[OutputRow]) -> ValidationResult:
         )
 
     return result
+
+
+def validate_stock_row(row: StockQuestionRow) -> list[str]:
+    """Validate one stock import row against Jim's MVP CSV contract."""
+
+    reasons: list[str] = []
+    if not row.topic_import_id.strip():
+        reasons.append("Missing required field: Topic Import ID")
+    if not row.question.strip():
+        reasons.append("Missing required field: Question")
+    if row.answer_type not in VALID_ANSWER_TYPES:
+        reasons.append(f"Invalid Answer Type: {row.answer_type!r}")
+    if row.answer_type == "multiple_choice" and "||" not in row.answer_options:
+        reasons.append("Multiple choice rows require ||-delimited Answer Options")
+    if row.answer_type == "yes_no" and row.answer_options.strip():
+        reasons.append("yes_no stock rows must leave Answer Options blank")
+    for label, value in (
+        ("Start Date", row.start_date),
+        ("Expiration Date", row.expiration_date),
+        ("Resolution Date", row.resolution_date),
+    ):
+        if not value or not _is_valid_iso8601(value):
+            reasons.append(f"Invalid ISO 8601 date in {label}: {value!r}")
+    expiration = _parse_iso8601(row.expiration_date)
+    resolution = _parse_iso8601(row.resolution_date)
+    if expiration is not None and resolution is not None and resolution <= expiration:
+        reasons.append("Resolution Date must be after Expiration Date")
+    priority_reason = _validate_priority(row.priority)
+    if priority_reason is not None:
+        reasons.append(priority_reason)
+    if "{" in row.question or "}" in row.question or "{" in row.answer_options or "}" in row.answer_options:
+        reasons.append("Unresolved placeholder remains in stock row")
+    return reasons
+
+
+def validate_stock_rows(rows: Sequence[StockQuestionRow]) -> list[tuple[StockQuestionRow, list[str]]]:
+    """Return ``(row, reasons)`` pairs for invalid stock rows."""
+
+    return [(row, reasons) for row in rows if (reasons := validate_stock_row(row))]
 
 
 def write_errors_csv(

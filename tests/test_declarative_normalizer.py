@@ -56,6 +56,20 @@ def _write_world_cup_stats(path: Path) -> Path:
     return path
 
 
+def _write_stock_watchlist(path: Path) -> Path:
+    rows = [
+        {
+            "Topic Import ID": "stocks-us-market",
+            "Company Name": "Apple Inc.",
+            "Ticker": "AAPL",
+            "topic_name": "US Stock Market",
+        }
+    ]
+    path.parent.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame(rows).to_excel(path, index=False)
+    return path
+
+
 def _world_cup_spec() -> NormalizationSpec:
     return NormalizationSpec(
         package_key="WorldCup",
@@ -200,6 +214,65 @@ def test_ai_profile_heuristic_maps_world_cup_layout(tmp_path: Path) -> None:
     assert metric_source.field_mappings["player_name"] == "Player"
     assert metric_source.metric_mappings["GOAL_PROBABILITY"] == "Goal Probability"
     assert metric_source.metadata_mappings["star_power"] == "Star Power"
+
+
+def test_stocks_profile_can_be_entity_source_only(tmp_path: Path) -> None:
+    watchlist = _write_stock_watchlist(tmp_path / "top-150-stocks.xlsx")
+    detected = [
+        inspect_file(
+            watchlist,
+            category_key="stocks",
+            preferred_role=SourceRole.ENTITY_SOURCE,
+        ).detected_file
+    ]
+    spec = NormalizationSpec(
+        package_key="stocks",
+        sources={
+            "metric_source": SourceNormalizationSpec(
+                source_role=SourceRole.ENTITY_SOURCE,
+                file_pattern="top-150-stocks.xlsx",
+                field_mappings={
+                    "company_name": "Company Name",
+                    "ticker": "Ticker",
+                    "topic_import_id": "Topic Import ID",
+                },
+                metadata_mappings={"topic_name": "topic_name"},
+            )
+        },
+    )
+
+    bundle = execute_normalization_spec(spec, detected, {})
+
+    errors = [i for i in bundle.issues if i.severity == ValidationSeverity.ERROR]
+    assert not errors
+    assert bundle.entities[0].entity_id == "AAPL"
+    assert bundle.entities[0].display_name == "Apple Inc. (AAPL)"
+
+
+def test_ai_profile_heuristic_maps_stocks_metric_slot_to_entity_source(tmp_path: Path) -> None:
+    _write_stock_watchlist(tmp_path / "top-150-stocks.xlsx")
+
+    spec, snapshots = propose_normalization_spec(
+        {
+            "inputs": {
+                "file_roles": {
+                    "stocks": {
+                        "metric_source": "entity_source",
+                    }
+                }
+            }
+        },
+        category_key="stocks",
+        input_dir=tmp_path,
+        file_config={"metric_source": "top-150-stocks.xlsx"},
+        use_ai=True,
+    )
+
+    assert snapshots[0]["source_role"] == "entity_source"
+    source = spec.sources["metric_source"]
+    assert source.source_role == SourceRole.ENTITY_SOURCE
+    assert source.field_mappings["company_name"] == "Company Name"
+    assert source.field_mappings["ticker"] == "Ticker"
 
 
 def test_unknown_schedule_only_package_uses_saved_declarative_spec(

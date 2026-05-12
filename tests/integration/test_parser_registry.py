@@ -9,9 +9,12 @@ from core.parsers.registry import get_category_normalizer, list_registered_categ
 
 @pytest.mark.integration
 def test_registered_verticals_include_mlb_and_f1() -> None:
+    import core.parsers.service  # noqa: F401
+
     cats = list_registered_categories()
     assert "mlb" in cats
     assert "f1" in cats
+    assert "stocks" in cats
 
 
 @pytest.mark.integration

@@ -17,6 +17,7 @@ from .contracts import (
     EventDatetimeSpec,
     EventIdSpec,
     MatchupSplitSpec,
+    ContentEntity,
     NormalizationSpec,
     NormalizedBundle,
     NormalizedEvent,
@@ -38,7 +39,8 @@ def validate_normalization_spec(spec: NormalizationSpec) -> list[ValidationIssue
         issues.append(_error("invalid_normalization_spec", "At least one source is required"))
 
     roles = {source.source_role for source in spec.sources.values()}
-    if SourceRole.EVENT_SOURCE not in roles:
+    entity_only = SourceRole.EVENT_SOURCE not in roles and SourceRole.ENTITY_SOURCE in roles
+    if SourceRole.EVENT_SOURCE not in roles and not entity_only:
         issues.append(_error("invalid_normalization_spec", "event_source is required"))
 
     for slot_id, source in spec.sources.items():
@@ -53,6 +55,8 @@ def validate_normalization_spec(spec: NormalizationSpec) -> list[ValidationIssue
             _validate_event_source(slot_id, source, issues)
         elif source.source_role == SourceRole.METRIC_SOURCE:
             _validate_metric_source(slot_id, source, issues)
+        elif source.source_role == SourceRole.ENTITY_SOURCE and entity_only:
+            _validate_entity_source(slot_id, source, issues)
 
     return issues
 
@@ -70,10 +74,17 @@ def execute_normalization_spec(
 
     detected_by_role = {d.source_role: d for d in detected_files}
     events: list[NormalizedEvent] = []
+    entities: list[ContentEntity] = []
     players: list[PlayerStatRecord] = []
 
     event_spec = _source_for_role(spec, SourceRole.EVENT_SOURCE)
     event_file = detected_by_role.get(SourceRole.EVENT_SOURCE)
+    entity_spec = _source_for_role(spec, SourceRole.ENTITY_SOURCE)
+    entity_file = detected_by_role.get(SourceRole.ENTITY_SOURCE)
+    if event_spec is None and entity_spec is not None and entity_file is not None:
+        entities, entity_issues = _normalize_entities(entity_spec, entity_file)
+        issues.extend(entity_issues)
+        return NormalizedBundle(entities=entities, issues=issues)
     if event_spec is None or event_file is None:
         return NormalizedBundle(
             issues=[_error("missing_event_source", "No event_source file was detected")]
@@ -88,7 +99,7 @@ def execute_normalization_spec(
         players, player_issues = _normalize_player_stats(metric_spec, metric_file)
         issues.extend(player_issues)
 
-    return NormalizedBundle(events=events, player_stats=players, issues=issues)
+    return NormalizedBundle(events=events, entities=entities, player_stats=players, issues=issues)
 
 
 def preview_normalization_spec(
@@ -105,9 +116,11 @@ def preview_normalization_spec(
     return json_safe(
         {
             "events": [e.__dict__ for e in bundle.events[:event_limit]],
+            "entities": [e.__dict__ for e in bundle.entities[:player_limit]],
             "player_stats": [p.__dict__ for p in bundle.player_stats[:player_limit]],
             "issues": [_issue_to_dict(i) for i in bundle.issues],
             "event_count": len(bundle.events),
+            "entity_count": len(bundle.entities),
             "player_stat_count": len(bundle.player_stats),
         }
     )
@@ -147,6 +160,22 @@ def _validate_metric_source(
                 f"Metric source {slot_id!r} is missing required mappings: {missing}",
             )
         )
+
+
+def _validate_entity_source(
+    slot_id: str, source: SourceNormalizationSpec, issues: list[ValidationIssue]
+) -> None:
+    fields = set(source.field_mappings)
+    if {"company_name", "ticker"} <= fields:
+        return
+    if "entity_name" in fields:
+        return
+    issues.append(
+        _error(
+            "invalid_entity_mapping",
+            f"Entity source {slot_id!r} needs company_name/ticker mappings or entity_name",
+        )
+    )
 
 
 def _normalize_events(
@@ -231,6 +260,55 @@ def _normalize_player_stats(
     if not players:
         issues.append(_error("no_player_stats_normalized", "No player stat rows were normalized"))
     return players, issues
+
+
+def _normalize_entities(
+    source: SourceNormalizationSpec, detected: DetectedFile
+) -> tuple[list[ContentEntity], list[ValidationIssue]]:
+    entities: list[ContentEntity] = []
+    issues: list[ValidationIssue] = []
+    seen: set[str] = set()
+    for idx, row in enumerate(detected.records, start=detected.header_row_index + 2):
+        company = _cell(row, source.field_mappings.get("company_name"))
+        ticker = _cell(row, source.field_mappings.get("ticker"))
+        entity_name = _cell(row, source.field_mappings.get("entity_name"))
+        topic_import_id = _cell(row, source.field_mappings.get("topic_import_id"))
+        entity_id = (ticker or entity_name or company).strip()
+        if not entity_id:
+            continue
+        entity_id = entity_id.upper() if ticker else _slug(entity_id)
+        if entity_id in seen:
+            issues.append(
+                ValidationIssue(
+                    code="duplicate_entity",
+                    message=f"Duplicate entity id {entity_id!r}",
+                    severity=ValidationSeverity.WARNING,
+                    file_path=str(detected.file_path),
+                    source_role=detected.source_role,
+                    details={"row_number": idx},
+                )
+            )
+            continue
+        seen.add(entity_id)
+        display_name = f"{company} ({ticker.upper()})" if company and ticker else entity_name or company or entity_id
+        metadata = _metadata(row, source)
+        if company:
+            metadata.setdefault("company_name", company)
+        if ticker:
+            metadata.setdefault("ticker", ticker.upper())
+        entities.append(
+            ContentEntity(
+                entity_id=entity_id,
+                display_name=display_name,
+                entity_type="stock" if ticker else "entity",
+                topic_import_id=topic_import_id or None,
+                metadata=metadata,
+            )
+        )
+
+    if not entities:
+        issues.append(_error("no_entities_normalized", "No entity rows were normalized"))
+    return entities, issues
 
 
 def _event_teams(row: Mapping[str, Any], source: SourceNormalizationSpec) -> tuple[str, str]:

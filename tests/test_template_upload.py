@@ -66,3 +66,21 @@ def test_parse_template_csv_blocks_blank_priority_stays_blank():
     )
     rows = parse_template_csv_blocks(text)
     assert rows[0]["priority"] == ""
+
+
+def test_parse_stock_template_table_csv():
+    text = (
+        "Template ID,Template Name,Timeframe,Question Template,Answer Type,Answer Options,Recommended Priority,Notes\n"
+        "stocks_daily_close_higher,Daily Close Higher,Daily,Will {ASSET} close higher on {DATE}?,yes_no,,1,Core\n"
+        "stocks_daily_direction_mc,Daily Direction,Daily,How will {ASSET} finish?,multiple_choice,Higher||Lower,2,MC\n"
+    )
+
+    rows = parse_uploaded_template_file("stocks.csv", text)
+
+    assert [row["id"] for row in rows] == [
+        "stocks_daily_close_higher",
+        "stocks_daily_direction_mc",
+    ]
+    assert rows[0]["question_family"] == "stock"
+    assert rows[0]["answer_options"] == ""
+    assert rows[0]["timeframe"] == "Daily"

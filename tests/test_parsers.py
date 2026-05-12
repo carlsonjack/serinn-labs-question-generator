@@ -35,6 +35,7 @@ needs_inputs_stats = pytest.mark.skipif(
 def test_schedule_parser_normalizes_events(tmp_path: Path) -> None:
     schedule = write_mlb_schedule_minimal(tmp_path / "schedule.xlsx")
     settings = load_settings()
+    settings["date_filter"] = {"start": "2026-05-01", "end": "2026-05-31"}
     result = MlbScheduleParser(settings).load(schedule).normalize()
 
     assert not result.errors
@@ -103,6 +104,8 @@ def test_load_normalized_bundle_persists_profiles_and_has_no_issues(
     write_mlb_stats_minimal(tmp_path / "stats.xlsx")
     settings = load_settings()
     settings["inputs"]["directory"] = str(tmp_path)
+    settings["inputs"]["category_key"] = "mlb"
+    settings["date_filter"] = {"start": "2026-05-01", "end": "2026-05-31"}
 
     bundle = load_normalized_bundle(settings)
 

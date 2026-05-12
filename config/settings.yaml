@@ -1,10 +1,11 @@
 openai_api_key: ''
 model: gpt-5.4
-topic_import_id: world-cup
+topic_import_id: stocks-us-market
 topic_import_ids:
   mlb: mlb-regular-season
   f1: f1-race-winner
-subcategory: World Cup
+  stocks: stocks-us-market
+subcategory: Stocks
 top_n_per_team: 3
 templates_directory: templates
 templates_enabled:
@@ -30,8 +31,8 @@ templates_enabled:
   world_cup_event_winner_mc: true
   world_cup_entity_goal_prob: true
 date_filter:
-  start: '2026-06-11'
-  end: '2026-06-26'
+  start: '2026-05-30'
+  end: '2026-07-31'
 date_rules:
   default:
     start_offset_hours: -24
@@ -46,7 +47,9 @@ date_rules:
     expiration_offset_hours: 0
     resolution_offset_hours: 4
 batch_size: 100
-max_generated_questions: 5
+max_generated_questions: null
+stocks:
+  questions_per_day: 50
 model_pricing:
   gpt-4o:
     input: 2.5
@@ -59,7 +62,7 @@ model_pricing:
     output: 10.0
 inputs:
   directory: inputs
-  category_key: mls
+  category_key: stocks
   files:
     F1:
       schedule: f1_schedule.xlsx
@@ -69,12 +72,17 @@ inputs:
     mls:
       event_source: schedule.xlsx
       metric_source: stats.xlsx
+    stocks:
+      metric_source: top-150-stocks.xlsx
     world_cup:
       event_source: schedule.xlsx
       metric_source: stats.xlsx
   file_roles:
     F1:
       schedule: event_source
+    stocks:
+      asset_source: entity_source
+      metric_source: entity_source
   packages:
     f1:
       race_session_values:

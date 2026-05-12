@@ -25,9 +25,59 @@ def parse_uploaded_template_file(name: str, raw_bytes: bytes | str) -> list[dict
         return [data]
 
     if suffix == ".csv":
+        if _looks_like_stock_template_table(text):
+            return parse_stock_template_table(text)
         return parse_template_csv_blocks(text)
 
     raise ValueError("Only .json and .csv template files are accepted.")
+
+
+def _looks_like_stock_template_table(text: str) -> bool:
+    rows = [row for row in csv.reader(io.StringIO(text)) if any(str(c).strip() for c in row)]
+    if not rows:
+        return False
+    headers = {str(h).strip().lower() for h in rows[0]}
+    return {"template id", "question template", "answer type"} <= headers
+
+
+def parse_stock_template_table(text: str) -> list[dict[str, Any]]:
+    """Parse the client's stock template CSV into repo-native template dicts."""
+
+    reader = csv.DictReader(io.StringIO(text))
+    templates: list[dict[str, Any]] = []
+    for row_number, row in enumerate(reader, start=2):
+        if not row or not any(str(value or "").strip() for value in row.values()):
+            continue
+        template_id = str(row.get("Template ID") or "").strip()
+        question = str(row.get("Question Template") or "").strip()
+        answer_type = str(row.get("Answer Type") or "").strip()
+        if not template_id or not question or not answer_type:
+            raise ValueError(f"Stock template row {row_number} is missing required fields.")
+        templates.append(
+            {
+                "id": template_id,
+                "subcategory": "stocks",
+                "question_family": "stock",
+                "question": question,
+                "answer_type": answer_type,
+                "answer_options": str(row.get("Answer Options") or "").strip(),
+                "priority": _coerce_stock_priority(row.get("Recommended Priority")),
+                "requires_entities": False,
+                "timeframe": str(row.get("Timeframe") or "").strip(),
+                "template_name": str(row.get("Template Name") or "").strip(),
+                "notes": str(row.get("Notes") or "").strip(),
+            }
+        )
+    if not templates:
+        raise ValueError("Stock template CSV contains no templates.")
+    return templates
+
+
+def _coerce_stock_priority(value: Any) -> int | str:
+    raw = str(value or "").strip()
+    if not raw:
+        return ""
+    return _parse_int(raw, "Recommended Priority")
 
 
 def parse_template_csv_blocks(text: str) -> list[dict[str, Any]]:

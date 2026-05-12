@@ -18,11 +18,14 @@ ALLOWED_KEYS: frozenset[str] = frozenset(
         "stat_column",
         "top_n_per_team",
         "line",
+        "timeframe",
+        "template_name",
+        "notes",
         "_comment",
     }
 )
 
-QUESTION_FAMILIES: frozenset[str] = frozenset({"event", "entity_stat"})
+QUESTION_FAMILIES: frozenset[str] = frozenset({"event", "entity_stat", "stock"})
 ANSWER_TYPES: frozenset[str] = frozenset({"yes_no", "multiple_choice"})
 
 
@@ -41,6 +44,9 @@ class QuestionTemplate:
     stat_column: str | None = None
     top_n_per_team: int | None = None
     line: float | None = None
+    timeframe: str | None = None
+    template_name: str | None = None
+    notes: str | None = None
     _comment: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
@@ -79,11 +85,14 @@ def parse_template_dict(data: dict[str, Any]) -> QuestionTemplate:
     if not isinstance(requires_entities, bool):
         raise ValueError("requires_entities must be a boolean")
 
-    answer_options = _str_field(data, "answer_options")
+    answer_options = _optional_str_field(data, "answer_options")
 
     stat_column = data.get("stat_column")
     top_raw = data.get("top_n_per_team")
     line_raw = data.get("line")
+    timeframe = data.get("timeframe")
+    template_name = data.get("template_name")
+    notes = data.get("notes")
     comment = data.get("_comment")
 
     if stat_column is not None and not isinstance(stat_column, str):
@@ -97,6 +106,12 @@ def parse_template_dict(data: dict[str, Any]) -> QuestionTemplate:
         raise ValueError("line must be a number or omitted")
     if comment is not None and not isinstance(comment, str):
         raise ValueError("_comment must be a string or omitted")
+    if timeframe is not None and not isinstance(timeframe, str):
+        raise ValueError("timeframe must be a string or omitted")
+    if template_name is not None and not isinstance(template_name, str):
+        raise ValueError("template_name must be a string or omitted")
+    if notes is not None and not isinstance(notes, str):
+        raise ValueError("notes must be a string or omitted")
 
     line: float | None = float(line_raw) if line_raw is not None else None
 
@@ -110,14 +125,20 @@ def parse_template_dict(data: dict[str, Any]) -> QuestionTemplate:
         if top_raw is None or int(top_raw) < 1:
             raise ValueError("entity_stat templates require top_n_per_team >= 1")
         top_n = int(top_raw)
-    else:
+    elif question_family == "event":
         if requires_entities:
             raise ValueError("event templates must set requires_entities to false")
         if stat_column is not None or top_raw is not None:
             raise ValueError("event templates must not set stat_column or top_n_per_team")
         top_n = None
+    else:
+        if requires_entities:
+            raise ValueError("stock templates must set requires_entities to false")
+        if stat_column is not None or top_raw is not None:
+            raise ValueError("stock templates must not set stat_column or top_n_per_team")
+        top_n = None
 
-    _validate_answer_options(answer_type, answer_options, requires_entities)
+    _validate_answer_options(answer_type, answer_options, requires_entities, question_family)
 
     return QuestionTemplate(
         id=qid,
@@ -131,6 +152,9 @@ def parse_template_dict(data: dict[str, Any]) -> QuestionTemplate:
         stat_column=stat_column.strip() if stat_column else None,
         top_n_per_team=top_n,
         line=line,
+        timeframe=timeframe.strip() if timeframe else None,
+        template_name=template_name.strip() if template_name else None,
+        notes=notes.strip() if notes else None,
         _comment=comment,
     )
 
@@ -144,6 +168,15 @@ def _str_field(data: dict[str, Any], key: str) -> str:
     if not val.strip():
         raise ValueError(f"{key} must be non-empty")
     return val
+
+
+def _optional_str_field(data: dict[str, Any], key: str) -> str:
+    if key not in data:
+        raise ValueError(f"Missing required key: {key}")
+    val = data[key]
+    if not isinstance(val, str):
+        raise ValueError(f"{key} must be a string")
+    return val.strip()
 
 
 def _priority_field(data: dict[str, Any], key: str) -> int | str:
@@ -161,8 +194,15 @@ def _priority_field(data: dict[str, Any], key: str) -> int | str:
     raise ValueError("priority must be an integer or blank")
 
 
-def _validate_answer_options(answer_type: str, answer_options: str, requires_entities: bool) -> None:
+def _validate_answer_options(
+    answer_type: str,
+    answer_options: str,
+    requires_entities: bool,
+    question_family: str,
+) -> None:
     if answer_type == "yes_no":
+        if question_family == "stock" and answer_options == "":
+            return
         if answer_options != "Yes||No":
             raise ValueError("yes_no templates must use answer_options: \"Yes||No\"")
         return

@@ -92,3 +92,49 @@ def write_f1_schedule_minimal(path: Path) -> Path:
     with pd.ExcelWriter(path) as writer:
         pd.DataFrame(rows).to_excel(writer, sheet_name="F1 Schedule", index=False)
     return path
+
+
+def write_stock_list_minimal(path: Path, *, rows: list[dict[str, object]] | None = None) -> Path:
+    """Minimal stock watchlist CSV matching client MVP columns."""
+
+    data = rows or [
+        {
+            "Topic Import ID": "stocks-us-market",
+            "Company Name": "Apple Inc.",
+            "Ticker": "AAPL",
+            "topic_name": "US Stock Market",
+        },
+        {
+            "Topic Import ID": "stocks-us-market",
+            "Company Name": "Microsoft Corp.",
+            "Ticker": "MSFT",
+            "topic_name": "US Stock Market",
+        },
+        {
+            "Topic Import ID": "stocks-us-market",
+            "Company Name": "Alphabet Inc.",
+            "Ticker": "GOOGL",
+            "topic_name": "US Stock Market",
+        },
+        {
+            "Topic Import ID": "stocks-us-market",
+            "Company Name": "Amazon.com Inc.",
+            "Ticker": "AMZN",
+            "topic_name": "US Stock Market",
+        },
+        {
+            "Topic Import ID": "stocks-us-market",
+            "Company Name": "NVIDIA Corp.",
+            "Ticker": "NVDA",
+            "topic_name": "US Stock Market",
+        },
+        {
+            "Topic Import ID": "stocks-us-market",
+            "Company Name": "Tesla Inc.",
+            "Ticker": "TSLA",
+            "topic_name": "US Stock Market",
+        },
+    ]
+    path.parent.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame(data).to_csv(path, index=False)
+    return path
