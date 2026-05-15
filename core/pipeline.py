@@ -7,7 +7,12 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
-from core.csv_export import DEFAULT_OUTPUT_DIR, write_generated_csv_auto, write_stock_import_csv_auto
+from core.csv_export import (
+    DEFAULT_OUTPUT_DIR,
+    write_content_import_csv_auto,
+    write_generated_csv_auto,
+    write_stock_import_csv_auto,
+)
 from core.dedup import deduplicate, write_flagged_csv
 from core.input_slots import get_inputs_category_key
 from core.generation import (
@@ -17,6 +22,7 @@ from core.generation import (
     PromptBuilder,
     PromptItem,
     RowAssembler,
+    ContentPlanner,
     StockPlanner,
     resolve_topic_import_id,
 )
@@ -34,6 +40,7 @@ from core.qa_summary import QASummary, build_qa_summary
 from core.schema_validator import (
     ValidationResult,
     validate_rows,
+    validate_import_rows,
     validate_stock_rows,
     write_errors_csv,
 )
@@ -193,6 +200,10 @@ def _is_stocks_package(category_key: str) -> bool:
     return normalize_template_package(category_key) == "stocks"
 
 
+def _is_content_template_set(templates: list[QuestionTemplate]) -> bool:
+    return bool(templates) and all(t.question_family == "content" for t in templates)
+
+
 def _run_stocks_pipeline(
     *,
     settings: dict[str, Any],
@@ -245,6 +256,71 @@ def _run_stocks_pipeline(
         return PipelineResult(
             success=False,
             message=f"Could not write stock output CSV: {exc}",
+            parser_warnings=warnings,
+        )
+
+    return PipelineResult(
+        success=True,
+        message=None,
+        output_csv=out_path,
+        parser_warnings=warnings,
+        batch_result=BatchResult(total_batches=0, successful_batches=0),
+    )
+
+
+def _run_content_pipeline(
+    *,
+    settings: dict[str, Any],
+    category_key: str,
+    bundle: NormalizedBundle,
+    templates: list[QuestionTemplate],
+    subcategory: str,
+    warnings: list[str],
+) -> PipelineResult:
+    """Generate deterministic content-list rows and write titled import CSV."""
+
+    try:
+        topic_import_id = resolve_topic_import_id(settings, category_key)
+        rows = ContentPlanner(
+            bundle.entities,
+            templates,
+            settings,
+            topic_import_id=topic_import_id,
+        ).generate()
+    except (TypeError, ValueError) as exc:
+        return _client_failure(f"Content generation settings error: {exc}", warnings)
+
+    invalid = validate_import_rows(rows)
+    if invalid:
+        first_row, reasons = invalid[0]
+        return PipelineResult(
+            success=False,
+            message=(
+                "Content output validation failed: "
+                + "; ".join(reasons)
+                + f" (question={first_row.question!r})"
+            ),
+            parser_warnings=warnings,
+        )
+
+    date_filter = settings.get("date_filter", {})
+    try:
+        out_path = write_content_import_csv_auto(
+            rows,
+            subcategory=subcategory,
+            date_filter=date_filter,
+            output_dir=DEFAULT_OUTPUT_DIR,
+        )
+    except KeyError as exc:
+        return PipelineResult(
+            success=False,
+            message=f"Output configuration error: missing date_filter field {exc}.",
+            parser_warnings=warnings,
+        )
+    except OSError as exc:
+        return PipelineResult(
+            success=False,
+            message=f"Could not write content output CSV: {exc}",
             parser_warnings=warnings,
         )
 
@@ -348,6 +424,22 @@ def run_pipeline(
                 parser_warnings=warnings,
             )
         return _run_stocks_pipeline(
+            settings=settings,
+            category_key=ck,
+            bundle=bundle,
+            templates=active,
+            subcategory=subcategory,
+            warnings=warnings,
+        )
+
+    if _is_content_template_set(active):
+        if not bundle.entities:
+            return PipelineResult(
+                success=False,
+                message="No content entities in the selected input. Check content inputs.",
+                parser_warnings=warnings,
+            )
+        return _run_content_pipeline(
             settings=settings,
             category_key=ck,
             bundle=bundle,

@@ -6,6 +6,7 @@ from core.template_config.schema import QuestionTemplate
 from core.template_ui import (
     explain_template,
     filter_templates_for_package,
+    humanize_package_key,
     infer_subcategory_for_package,
     package_aliases_for_settings,
     template_to_ui_dict,
@@ -62,6 +63,66 @@ def test_filter_templates_for_package_normalizes_case():
 def test_infer_subcategory_for_package_prefers_template_value():
     subcategory = infer_subcategory_for_package([_event_tpl()], "mlb")
     assert subcategory == "MLB"
+
+
+def test_infer_subcategory_for_package_majority_not_first_by_id():
+    """Avoid using sorted-by-id first template when many templates share one subcategory."""
+
+    music = QuestionTemplate(
+        id="music-mc-01",
+        subcategory="Music",
+        question_family="event",
+        question="Q?",
+        answer_type="yes_no",
+        answer_options="Yes||No",
+        priority="",
+        requires_entities=False,
+    )
+    movie_like = [
+        QuestionTemplate(
+            id=f"movie-yn-{i:02d}",
+            subcategory="Movies",
+            question_family="event",
+            question="Q?",
+            answer_type="yes_no",
+            answer_options="Yes||No",
+            priority="",
+            requires_entities=False,
+        )
+        for i in range(9)
+    ]
+    # Both Music and Movies labels match this package (broad aliases).
+    aliases = ["Music", "Movies"]
+    templates = [music, *movie_like]
+    sub = infer_subcategory_for_package(templates, "movies", aliases=aliases)
+    assert sub == "Movies"
+
+
+def test_infer_subcategory_for_package_tie_goes_to_humanized_key():
+    music = QuestionTemplate(
+        id="music-mc-01",
+        subcategory="Music",
+        question_family="event",
+        question="Q?",
+        answer_type="yes_no",
+        answer_options="Yes||No",
+        priority="",
+        requires_entities=False,
+    )
+    movies = QuestionTemplate(
+        id="movie-yn-01",
+        subcategory="Movies",
+        question_family="event",
+        question="Q?",
+        answer_type="yes_no",
+        answer_options="Yes||No",
+        priority="",
+        requires_entities=False,
+    )
+    aliases = ["Music", "Movies"]
+    sub = infer_subcategory_for_package([music, movies], "movies", aliases=aliases)
+    assert sub == humanize_package_key("movies")
+    assert sub == "Movies"
 
 
 def test_filter_templates_for_package_accepts_aliases():

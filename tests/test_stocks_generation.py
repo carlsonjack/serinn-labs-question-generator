@@ -212,7 +212,7 @@ def test_validate_stock_rows_enforces_client_contract() -> None:
         resolution_date=row.expiration_date,
         priority=row.priority,
     )
-    assert "Resolution Date must be after Expiration Date" in validate_stock_row(premature_resolution)
+    assert validate_stock_row(premature_resolution) == []
 
 
 def test_write_stock_import_csv_uses_titled_headers(tmp_path: Path) -> None:

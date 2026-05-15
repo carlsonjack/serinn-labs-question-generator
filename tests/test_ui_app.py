@@ -9,6 +9,7 @@ from unittest.mock import patch
 
 import pytest
 
+from core.parsers.contracts import ContentEntity, NormalizedBundle
 from core.pipeline import PipelineResult
 from core.template_config.schema import QuestionTemplate
 from tests.fixtures.workbooks import write_stock_list_minimal
@@ -225,6 +226,56 @@ def test_upload_requires_xlsx(client):
     assert rv.status_code == 400
 
 
+def test_upload_applies_inferred_date_range_to_settings(client, tmp_path, monkeypatch):
+    import pandas as pd
+
+    import ui.app as ui_app
+
+    root = tmp_path / "root"
+    (root / "inputs").mkdir(parents=True)
+    monkeypatch.setattr(ui_app, "_ROOT", root)
+
+    writes: list[dict] = []
+
+    def spy_save(updates: dict) -> None:
+        writes.append(dict(updates))
+
+    monkeypatch.setattr(ui_app, "save_settings_yaml", spy_save)
+    monkeypatch.setattr(
+        ui_app,
+        "infer_date_range_from_excel_paths",
+        lambda _paths: ("2026-06-01", "2026-06-30"),
+    )
+    monkeypatch.setattr(
+        ui_app,
+        "load_settings",
+        lambda: {
+            "inputs": {
+                "directory": "inputs",
+                "category_key": "p",
+                "files": {"p": {"event_source": "game.xlsx"}},
+            },
+        },
+    )
+
+    bio = io.BytesIO()
+    pd.DataFrame([{"Date": "2026-05-01"}]).to_excel(bio, index=False)
+    bio.seek(0)
+
+    rv = client.post(
+        "/upload",
+        data={"category_key": "p", "event_source": (bio, "ignored.xlsx")},
+        content_type="multipart/form-data",
+    )
+    assert rv.status_code == 200
+    data = rv.get_json()
+    assert data["date_filter_auto"]["applied"] is True
+    assert data["date_filter_auto"]["start"] == "2026-06-01"
+    assert data["date_filter_auto"]["end"] == "2026-06-30"
+    assert writes == [{"date_filter": {"start": "2026-06-01", "end": "2026-06-30"}}]
+    assert (root / "inputs" / "game.xlsx").is_file()
+
+
 def test_upload_templates_writes_json(client, tmp_path, monkeypatch):
     monkeypatch.setattr("ui.app.resolve_templates_directory", lambda _s: tmp_path)
     monkeypatch.setattr("ui.app.load_settings_disk_only", lambda: {"templates_enabled": {}})
@@ -277,6 +328,146 @@ def test_upload_templates_writes_multiple_templates_from_csv(client, tmp_path, m
     assert [x["id"] for x in data["saved"]] == ["csv_tpl_one", "csv_tpl_two"]
     assert (tmp_path / "csv_tpl_one.json").is_file()
     assert (tmp_path / "csv_tpl_two.json").is_file()
+
+
+def test_upload_templates_normalizes_movie_placeholders(client, tmp_path, monkeypatch):
+    monkeypatch.setattr("ui.app.resolve_templates_directory", lambda _s: tmp_path)
+    monkeypatch.setattr("ui.app.load_settings_disk_only", lambda: {"templates_enabled": {}})
+    monkeypatch.setattr("ui.app.save_settings_yaml", lambda _u: None)
+    monkeypatch.setattr(
+        "ui.app.load_settings",
+        lambda: {
+            "openai_api_key": "",
+            "inputs": {"category_key": "movies", "files": {"movies": {}}},
+        },
+    )
+    monkeypatch.setattr(
+        "ui.app.load_normalized_bundle",
+        lambda _settings, category_key: NormalizedBundle(
+            entities=[
+                ContentEntity(
+                    entity_id="alpha",
+                    display_name="Alpha",
+                    metadata={"title": "Alpha", "release_date": "2026-05-15"},
+                ),
+                ContentEntity(
+                    entity_id="bravo",
+                    display_name="Bravo",
+                    metadata={"title": "Bravo", "release_date": "2026-05-15"},
+                ),
+            ]
+        ),
+    )
+    tpl = {
+        "id": "movie_upload_tpl",
+        "subcategory": "Movies",
+        "question_family": "content",
+        "question": "Which movie wins?",
+        "answer_type": "multiple_choice",
+        "answer_options": "[MOVIE_A]||[MOVIE_B]",
+        "priority": 1,
+        "requires_entities": False,
+    }
+
+    rv = client.post(
+        "/upload/templates",
+        data={"file": (io.BytesIO(json.dumps(tpl).encode("utf-8")), "upload.json")},
+        content_type="multipart/form-data",
+    )
+
+    assert rv.status_code == 200
+    data = rv.get_json()
+    assert data["ok"] is True
+    assert "Mapped [MOVIE_A] to [ENTITY_A]." in [w["warning"] for w in data["warnings"]]
+    saved = json.loads((tmp_path / "movie_upload_tpl.json").read_text(encoding="utf-8"))
+    assert saved["answer_options"] == "[ENTITY_A]||[ENTITY_B]"
+    assert saved["generation_strategy"] == "multi_entity_choice"
+
+
+def _minimal_template_json(tpl_id: str, question: str = "Q?") -> str:
+    return json.dumps(
+        {
+            "id": tpl_id,
+            "subcategory": "MLB",
+            "question_family": "event",
+            "question": question,
+            "answer_type": "yes_no",
+            "answer_options": "Yes||No",
+            "priority": "",
+            "requires_entities": False,
+        }
+    )
+
+
+def test_upload_templates_409_when_id_exists_elsewhere(client, tmp_path, monkeypatch):
+    monkeypatch.setattr("ui.app.resolve_templates_directory", lambda _s: tmp_path)
+    monkeypatch.setattr("ui.app.load_settings_disk_only", lambda: {"templates_enabled": {}})
+    monkeypatch.setattr("ui.app.save_settings_yaml", lambda _u: None)
+
+    (tmp_path / "legacy_name.json").write_text(
+        _minimal_template_json("disk_dup_id"), encoding="utf-8"
+    )
+
+    body = _minimal_template_json("disk_dup_id")
+    rv = client.post(
+        "/upload/templates",
+        data={"file": (io.BytesIO(body.encode("utf-8")), "upload.json")},
+        content_type="multipart/form-data",
+    )
+    assert rv.status_code == 409
+    j = rv.get_json()
+    assert j.get("conflict") is True
+    assert any(c["template_id"] == "disk_dup_id" for c in j["conflicts"])
+    assert (tmp_path / "legacy_name.json").is_file()
+    assert not (tmp_path / "disk_dup_id.json").is_file()
+
+
+def test_upload_templates_replace_existing_removes_legacy_duplicate(
+    client, tmp_path, monkeypatch
+):
+    monkeypatch.setattr("ui.app.resolve_templates_directory", lambda _s: tmp_path)
+    monkeypatch.setattr("ui.app.load_settings_disk_only", lambda: {"templates_enabled": {}})
+    monkeypatch.setattr("ui.app.save_settings_yaml", lambda _u: None)
+
+    legacy = tmp_path / "legacy_name.json"
+    legacy.write_text(_minimal_template_json("disk_dup_id"), encoding="utf-8")
+
+    body = _minimal_template_json("disk_dup_id", question="Updated Q?")
+    rv = client.post(
+        "/upload/templates",
+        data={
+            "file": (io.BytesIO(body.encode("utf-8")), "upload.json"),
+            "replace_existing": "1",
+        },
+        content_type="multipart/form-data",
+    )
+    assert rv.status_code == 200
+    j = rv.get_json()
+    assert j.get("replaced_duplicates") is True
+    canonical = tmp_path / "disk_dup_id.json"
+    assert canonical.is_file()
+    assert "Updated Q?" in canonical.read_text(encoding="utf-8")
+    assert not legacy.is_file()
+
+
+def test_upload_templates_same_canonical_file_rewrites_without_409(
+    client, tmp_path, monkeypatch
+):
+    monkeypatch.setattr("ui.app.resolve_templates_directory", lambda _s: tmp_path)
+    monkeypatch.setattr("ui.app.load_settings_disk_only", lambda: {"templates_enabled": {}})
+    monkeypatch.setattr("ui.app.save_settings_yaml", lambda _u: None)
+
+    (tmp_path / "same_id.json").write_text(
+        _minimal_template_json("same_id", question="Old?"), encoding="utf-8"
+    )
+    body = _minimal_template_json("same_id", question="New?")
+    rv = client.post(
+        "/upload/templates",
+        data={"file": (io.BytesIO(body.encode("utf-8")), "reupload.json")},
+        content_type="multipart/form-data",
+    )
+    assert rv.status_code == 200
+    assert "New?" in (tmp_path / "same_id.json").read_text(encoding="utf-8")
 
 
 def test_upload_templates_rejects_duplicate_ids_in_csv(client, tmp_path, monkeypatch):

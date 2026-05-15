@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from collections import Counter
 from collections.abc import Iterable, Mapping
 from typing import Any
 
@@ -81,20 +82,9 @@ def filter_templates_for_package(
     )
 
 
-def infer_subcategory_for_package(
-    templates: Iterable[QuestionTemplate],
-    package_key: str,
-    fallback: str = "",
-    aliases: Iterable[str] | None = None,
-) -> str:
-    """Return the UI/display subcategory label for the selected package."""
+def humanize_package_key(package_key: str) -> str:
+    """Turn an ``inputs.files`` package key into a short display label."""
 
-    matched = filter_templates_for_package(templates, package_key, aliases)
-    if matched:
-        return matched[0].subcategory
-    raw = (fallback or "").strip()
-    if raw:
-        return raw
     pkg = (package_key or "").strip()
     if not pkg:
         return "Content"
@@ -103,6 +93,39 @@ def infer_subcategory_for_package(
     if len(pkg) <= 4:
         return pkg.upper()
     return pkg[:1].upper() + pkg[1:]
+
+
+def infer_subcategory_for_package(
+    templates: Iterable[QuestionTemplate],
+    package_key: str,
+    fallback: str = "",
+    aliases: Iterable[str] | None = None,
+) -> str:
+    """Return the UI/display subcategory label for the selected package.
+
+    The label follows the **input package** (and configured aliases), not the
+    first matching template by id — otherwise ``music-*`` templates sorted before
+    ``movie-*`` could show *Music* while *movies* is selected.
+    """
+
+    alias_list = [str(a).strip() for a in (aliases or []) if str(a).strip()]
+    if len(alias_list) == 1:
+        return alias_list[0]
+
+    matched = filter_templates_for_package(templates, package_key, aliases)
+    if matched:
+        counts = Counter(t.subcategory for t in matched)
+        if len(counts) == 1:
+            return next(iter(counts))
+        top_subcat, top_n = counts.most_common(1)[0]
+        if top_n / len(matched) >= 0.9:
+            return top_subcat
+        return humanize_package_key(package_key)
+
+    raw = (fallback or "").strip()
+    if raw:
+        return raw
+    return humanize_package_key(package_key)
 
 
 def _preview_question_text(t: QuestionTemplate) -> str:
@@ -141,7 +164,7 @@ def explain_template(t: QuestionTemplate) -> list[str]:
                 f"This template uses a numeric line ({t.line}) in the prompt; "
                 "thresholds are still enforced in code from config."
             )
-    else:
+    elif t.question_family == "entity_stat":
         lines.append(
             "One output row per content unit that has enough entity metrics. Answer choices "
             "are only entities returned from your input files — the model does not invent names."
@@ -151,6 +174,11 @@ def explain_template(t: QuestionTemplate) -> list[str]:
                 f"Entities are ranked by the `{t.stat_column}` column in metrics; "
                 f"top {t.top_n_per_team or '?'} per side are offered as options."
             )
+    else:
+        lines.append(
+            "One deterministic output row per normalized content entity, pair, or configured "
+            "static option set. Placeholders are filled from the approved normalizer profile."
+        )
 
     if t._comment:
         lines.append(f"Author note: {t._comment}")

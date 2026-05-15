@@ -95,3 +95,44 @@ def test_get_date_rules_for_category_merges() -> None:
     assert r["start_offset_hours"] == -24
     assert r["expiration_offset_hours"] == 0
     assert r["resolution_offset_hours"] == 8
+    assert r["resolution_offset_anchor"] == "kickoff"
+
+
+def test_resolution_offset_anchor_expiration() -> None:
+    settings = {
+        "date_rules": {
+            "default": {
+                "start_offset_hours": 0,
+                "expiration_offset_hours": 2,
+                "resolution_offset_hours": 4,
+                "resolution_offset_anchor": "expiration",
+            }
+        }
+    }
+    r = compute_question_dates(
+        "2026-06-01T12:00:00",
+        category_key="any",
+        settings=settings,
+    )
+    assert r.start_date == "2026-06-01T12:00:00"
+    assert r.expiration_date == "2026-06-01T14:00:00"
+    assert r.resolution_date == "2026-06-01T18:00:00"
+
+
+def test_resolution_offset_anchor_kickoff_matches_legacy_when_exp_is_zero() -> None:
+    settings = {
+        "date_rules": {
+            "default": {
+                "start_offset_hours": -24,
+                "expiration_offset_hours": 0,
+                "resolution_offset_hours": 4,
+                "resolution_offset_anchor": "kickoff",
+            }
+        }
+    }
+    r = compute_question_dates(
+        "2026-05-15T21:40:00",
+        category_key="mlb",
+        settings=settings,
+    )
+    assert r.resolution_date == "2026-05-16T01:40:00"

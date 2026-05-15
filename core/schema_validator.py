@@ -15,6 +15,7 @@ from pathlib import Path
 from typing import Any, Sequence
 
 from core.csv_export import CSV_WRITE_ENCODING
+from core.generation.content import ImportQuestionRow
 from core.generation.stocks import StockQuestionRow
 from core.generation.row_assembler import OUTPUT_COLUMNS, OutputRow
 
@@ -155,8 +156,8 @@ def validate_rows(rows: Sequence[OutputRow]) -> ValidationResult:
     return result
 
 
-def validate_stock_row(row: StockQuestionRow) -> list[str]:
-    """Validate one stock import row against Jim's MVP CSV contract."""
+def validate_import_row(row: ImportQuestionRow) -> list[str]:
+    """Validate one deterministic import row against Jim's titled CSV contract."""
 
     reasons: list[str] = []
     if not row.topic_import_id.strip():
@@ -168,7 +169,7 @@ def validate_stock_row(row: StockQuestionRow) -> list[str]:
     if row.answer_type == "multiple_choice" and "||" not in row.answer_options:
         reasons.append("Multiple choice rows require ||-delimited Answer Options")
     if row.answer_type == "yes_no" and row.answer_options.strip():
-        reasons.append("yes_no stock rows must leave Answer Options blank")
+        reasons.append("yes_no import rows must leave Answer Options blank")
     for label, value in (
         ("Start Date", row.start_date),
         ("Expiration Date", row.expiration_date),
@@ -176,22 +177,31 @@ def validate_stock_row(row: StockQuestionRow) -> list[str]:
     ):
         if not value or not _is_valid_iso8601(value):
             reasons.append(f"Invalid ISO 8601 date in {label}: {value!r}")
-    expiration = _parse_iso8601(row.expiration_date)
-    resolution = _parse_iso8601(row.resolution_date)
-    if expiration is not None and resolution is not None and resolution <= expiration:
-        reasons.append("Resolution Date must be after Expiration Date")
     priority_reason = _validate_priority(row.priority)
     if priority_reason is not None:
         reasons.append(priority_reason)
-    if "{" in row.question or "}" in row.question or "{" in row.answer_options or "}" in row.answer_options:
-        reasons.append("Unresolved placeholder remains in stock row")
+    unresolved_chars = "{}[]"
+    if any(ch in row.question or ch in row.answer_options for ch in unresolved_chars):
+        reasons.append("Unresolved placeholder remains in import row")
     return reasons
+
+
+def validate_stock_row(row: StockQuestionRow) -> list[str]:
+    """Validate one stock import row against Jim's MVP CSV contract."""
+
+    return validate_import_row(row)
 
 
 def validate_stock_rows(rows: Sequence[StockQuestionRow]) -> list[tuple[StockQuestionRow, list[str]]]:
     """Return ``(row, reasons)`` pairs for invalid stock rows."""
 
     return [(row, reasons) for row in rows if (reasons := validate_stock_row(row))]
+
+
+def validate_import_rows(rows: Sequence[ImportQuestionRow]) -> list[tuple[ImportQuestionRow, list[str]]]:
+    """Return ``(row, reasons)`` pairs for invalid deterministic import rows."""
+
+    return [(row, reasons) for row in rows if (reasons := validate_import_row(row))]
 
 
 def write_errors_csv(

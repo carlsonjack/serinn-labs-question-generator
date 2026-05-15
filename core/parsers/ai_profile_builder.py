@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Dict, List, Mapping, Optional
 
 from openai import BadRequestError, OpenAI
 from pydantic import BaseModel, Field
@@ -32,38 +32,38 @@ class MatchupSplitProposal(BaseModel):
 
 
 class EventDatetimeProposal(BaseModel):
-    datetime_column: str | None = None
-    date_column: str | None = None
-    time_column: str | None = None
-    timezone: str | None = None
+    datetime_column: Optional[str] = None
+    date_column: Optional[str] = None
+    time_column: Optional[str] = None
+    timezone: Optional[str] = None
 
 
 class EventIdProposal(BaseModel):
-    source_columns: list[str] = Field(default_factory=list)
+    source_columns: List[str] = Field(default_factory=list)
     strategy: str = "slug"
 
 
 class SourceSpecProposal(BaseModel):
     source_role: str
     file_pattern: str
-    sheet_name: str | None = None
-    header_row_index: int | None = None
-    field_mappings: dict[str, str] = Field(default_factory=dict)
-    metric_mappings: dict[str, str] = Field(default_factory=dict)
-    metadata_mappings: dict[str, str] = Field(default_factory=dict)
-    matchup_split: MatchupSplitProposal | None = None
-    event_datetime: EventDatetimeProposal | None = None
-    event_id: EventIdProposal | None = None
+    sheet_name: Optional[str] = None
+    header_row_index: Optional[int] = None
+    field_mappings: Dict[str, str] = Field(default_factory=dict)
+    metric_mappings: Dict[str, str] = Field(default_factory=dict)
+    metadata_mappings: Dict[str, str] = Field(default_factory=dict)
+    matchup_split: Optional[MatchupSplitProposal] = None
+    event_datetime: Optional[EventDatetimeProposal] = None
+    event_id: Optional[EventIdProposal] = None
 
 
 class NormalizationSpecProposal(BaseModel):
     package_key: str
-    sources: dict[str, SourceSpecProposal]
+    sources: Dict[str, SourceSpecProposal]
     notes: str = ""
 
 
 _SYSTEM_PROMPT = """\
-You propose declarative normalization specs for sports question generation.
+You propose declarative normalization specs for question generation.
 Map uploaded workbook snapshots into canonical records, but do not invent data.
 Return only the structured schema.
 
@@ -79,9 +79,22 @@ Canonical player metric fields:
 - team
 - metric_mappings: stat key -> numeric column
 
+Canonical content/entity fields for entertainment, markets, and other watchlists:
+- entity_name for a generic named item
+- title for releases such as albums, movies, TV shows, books, or games
+- release_date/premiere_date/air_date as release_date when present
+- artist, director, platform, network, studio, label, genre, content_type as metadata
+- topic_import_id when present
+
 Use matchup_split when a column like Matchup contains strings such as
 "Mexico v South Africa" or "Team A vs Team B". Preserve useful extra columns
 like Group, Venue, City, Archetype, or Star Power in metadata_mappings.
+For content release lists, use source_role "entity_source"; map the primary title
+column to title, the date column to release_date, and preserve descriptive columns
+in metadata_mappings. Release Date cells may look like plain dates ("June 4, 2026"),
+ISO strings, or marketing ranges such as "Daily – Jun 11–Jul 19, 2026" (Unicode dashes,
+episode windows). Always map that column to field key release_date anyway—the
+executor keeps the raw text; downstream parsing uses the **start** date of a range.
 Use uppercase stat keys with underscores, e.g. GOAL_PROBABILITY.
 """
 
@@ -143,7 +156,7 @@ def propose_normalization_spec(
     category_key: str,
     input_dir: Path,
     file_config: Mapping[str, str],
-    client: OpenAI | None = None,
+    client: Optional[OpenAI] = None,
     use_ai: bool = True,
 ) -> tuple[NormalizationSpec, list[dict[str, Any]]]:
     """Build a proposed NormalizationSpec and the workbook snapshots used."""
@@ -203,6 +216,9 @@ def _heuristic_spec(category_key: str, snapshots: list[dict[str, Any]]) -> Norma
         field_mappings = dict(first_sheet.get("field_mappings") or {})
         columns = [str(c) for c in first_sheet.get("columns") or []]
 
+        if source_role == SourceRole.UNKNOWN and _looks_like_content_fields(field_mappings):
+            source_role = SourceRole.ENTITY_SOURCE
+
         if source_role == SourceRole.EVENT_SOURCE:
             source = _heuristic_event_source(snap, first_sheet, field_mappings, columns)
         elif source_role == SourceRole.METRIC_SOURCE:
@@ -238,6 +254,11 @@ def _looks_like_stock_snapshot(snapshot: Mapping[str, Any]) -> bool:
         if {"company_name", "ticker"} <= fields:
             return True
     return False
+
+
+def _looks_like_content_fields(field_mappings: Mapping[str, str]) -> bool:
+    fields = set(field_mappings)
+    return bool(fields & {"title", "entity_name", "company_name", "ticker"})
 
 
 def _heuristic_entity_source(

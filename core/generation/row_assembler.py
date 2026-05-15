@@ -10,9 +10,14 @@ import logging
 from dataclasses import asdict, dataclass
 from typing import Any
 
-from core.date_rules import compute_question_dates
+from core.date_rules import compute_question_dates, parse_event_datetime
 from core.input_slots import get_inputs_category_key
 from core.parsers.contracts import NormalizedEvent
+from core.resolution_date_spec import (
+    EventResolutionContext,
+    ResolutionDateSpec,
+    compute_resolution_datetime_for_event,
+)
 from core.template_config.schema import QuestionTemplate
 
 from .prompt_builder import GeneratedQuestion, PromptItem
@@ -116,6 +121,19 @@ class RowAssembler:
             category_key=template.subcategory.lower(),
             settings=self.settings,
         )
+        resolution_date = dates.resolution_date
+        raw_spec = template.resolution_date_spec
+        if raw_spec:
+            spec = ResolutionDateSpec.model_validate(raw_spec)
+            ctx = EventResolutionContext(
+                event_datetime=parse_event_datetime(event.event_datetime),
+                question_start=parse_event_datetime(dates.start_date),
+                question_expiration=parse_event_datetime(dates.expiration_date),
+                metadata=dict(event.metadata or {}),
+            )
+            override = compute_resolution_datetime_for_event(spec, ctx)
+            if override is not None:
+                resolution_date = override.isoformat(timespec="seconds")
 
         return OutputRow(
             topic_import_id=self._resolved_topic_import_id(),
@@ -126,7 +144,7 @@ class RowAssembler:
             answer_options=generated.answer_options,
             start_date=dates.start_date,
             expiration_date=dates.expiration_date,
-            resolution_date=dates.resolution_date,
+            resolution_date=resolution_date,
             priority=template.priority,
         )
 

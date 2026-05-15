@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from typing import Any
 
+from core.resolution_date_spec import parse_resolution_date_spec_dict
+
 ALLOWED_KEYS: frozenset[str] = frozenset(
     {
         "id",
@@ -19,13 +21,20 @@ ALLOWED_KEYS: frozenset[str] = frozenset(
         "top_n_per_team",
         "line",
         "timeframe",
+        "template_type",
+        "required_dataset_fields",
+        "placeholder_mappings",
+        "generation_strategy",
+        "entity_count",
         "template_name",
         "notes",
         "_comment",
+        "resolution_date_rule",
+        "resolution_date_spec",
     }
 )
 
-QUESTION_FAMILIES: frozenset[str] = frozenset({"event", "entity_stat", "stock"})
+QUESTION_FAMILIES: frozenset[str] = frozenset({"event", "entity_stat", "stock", "content"})
 ANSWER_TYPES: frozenset[str] = frozenset({"yes_no", "multiple_choice"})
 
 
@@ -45,9 +54,16 @@ class QuestionTemplate:
     top_n_per_team: int | None = None
     line: float | None = None
     timeframe: str | None = None
+    template_type: str | None = None
+    required_dataset_fields: str | None = None
+    placeholder_mappings: dict[str, Any] | None = None
+    generation_strategy: str | None = None
+    entity_count: int | None = None
     template_name: str | None = None
     notes: str | None = None
     _comment: str | None = None
+    resolution_date_rule: str | None = None
+    resolution_date_spec: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize for tests and downstream JSON-friendly consumers."""
@@ -91,9 +107,16 @@ def parse_template_dict(data: dict[str, Any]) -> QuestionTemplate:
     top_raw = data.get("top_n_per_team")
     line_raw = data.get("line")
     timeframe = data.get("timeframe")
+    template_type = data.get("template_type")
+    required_dataset_fields = data.get("required_dataset_fields")
+    placeholder_mappings = data.get("placeholder_mappings")
+    generation_strategy = data.get("generation_strategy")
+    entity_count_raw = data.get("entity_count")
     template_name = data.get("template_name")
     notes = data.get("notes")
     comment = data.get("_comment")
+    resolution_date_rule = data.get("resolution_date_rule")
+    resolution_date_spec_raw = data.get("resolution_date_spec")
 
     if stat_column is not None and not isinstance(stat_column, str):
         raise ValueError("stat_column must be a string or omitted")
@@ -108,12 +131,38 @@ def parse_template_dict(data: dict[str, Any]) -> QuestionTemplate:
         raise ValueError("_comment must be a string or omitted")
     if timeframe is not None and not isinstance(timeframe, str):
         raise ValueError("timeframe must be a string or omitted")
+    if template_type is not None and not isinstance(template_type, str):
+        raise ValueError("template_type must be a string or omitted")
+    if required_dataset_fields is not None and not isinstance(required_dataset_fields, str):
+        raise ValueError("required_dataset_fields must be a string or omitted")
+    if placeholder_mappings is not None and not isinstance(placeholder_mappings, dict):
+        raise ValueError("placeholder_mappings must be an object or omitted")
+    if generation_strategy is not None and not isinstance(generation_strategy, str):
+        raise ValueError("generation_strategy must be a string or omitted")
+    if entity_count_raw is not None:
+        if isinstance(entity_count_raw, bool) or not isinstance(entity_count_raw, (int, float)):
+            raise ValueError("entity_count must be an integer or omitted")
+        if isinstance(entity_count_raw, float) and not entity_count_raw.is_integer():
+            raise ValueError("entity_count must be a whole number")
     if template_name is not None and not isinstance(template_name, str):
         raise ValueError("template_name must be a string or omitted")
     if notes is not None and not isinstance(notes, str):
         raise ValueError("notes must be a string or omitted")
+    if resolution_date_rule is not None and not isinstance(resolution_date_rule, str):
+        raise ValueError("resolution_date_rule must be a string or omitted")
+    resolution_date_rule_str = resolution_date_rule.strip() if resolution_date_rule else None
+    resolution_date_spec: dict[str, Any] | None = None
+    if resolution_date_spec_raw is not None:
+        if not isinstance(resolution_date_spec_raw, dict):
+            raise ValueError("resolution_date_spec must be an object or omitted")
+        resolution_date_spec = parse_resolution_date_spec_dict(resolution_date_spec_raw).model_dump(
+            mode="json"
+        )
 
     line: float | None = float(line_raw) if line_raw is not None else None
+    entity_count = int(entity_count_raw) if entity_count_raw is not None else None
+    if entity_count is not None and entity_count < 1:
+        raise ValueError("entity_count must be >= 1")
 
     if question_family == "entity_stat":
         if line_raw is not None:
@@ -131,11 +180,17 @@ def parse_template_dict(data: dict[str, Any]) -> QuestionTemplate:
         if stat_column is not None or top_raw is not None:
             raise ValueError("event templates must not set stat_column or top_n_per_team")
         top_n = None
-    else:
+    elif question_family == "stock":
         if requires_entities:
             raise ValueError("stock templates must set requires_entities to false")
         if stat_column is not None or top_raw is not None:
             raise ValueError("stock templates must not set stat_column or top_n_per_team")
+        top_n = None
+    else:
+        if requires_entities:
+            raise ValueError("content templates must set requires_entities to false")
+        if stat_column is not None or top_raw is not None:
+            raise ValueError("content templates must not set stat_column or top_n_per_team")
         top_n = None
 
     _validate_answer_options(answer_type, answer_options, requires_entities, question_family)
@@ -153,9 +208,16 @@ def parse_template_dict(data: dict[str, Any]) -> QuestionTemplate:
         top_n_per_team=top_n,
         line=line,
         timeframe=timeframe.strip() if timeframe else None,
+        template_type=template_type.strip() if template_type else None,
+        required_dataset_fields=required_dataset_fields.strip() if required_dataset_fields else None,
+        placeholder_mappings=placeholder_mappings,
+        generation_strategy=generation_strategy.strip() if generation_strategy else None,
+        entity_count=entity_count,
         template_name=template_name.strip() if template_name else None,
         notes=notes.strip() if notes else None,
         _comment=comment,
+        resolution_date_rule=resolution_date_rule_str or None,
+        resolution_date_spec=resolution_date_spec,
     )
 
 
@@ -201,7 +263,7 @@ def _validate_answer_options(
     question_family: str,
 ) -> None:
     if answer_type == "yes_no":
-        if question_family == "stock" and answer_options == "":
+        if question_family in {"stock", "content"} and answer_options == "":
             return
         if answer_options != "Yes||No":
             raise ValueError("yes_no templates must use answer_options: \"Yes||No\"")

@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import re
 import warnings
-from datetime import datetime
+from datetime import datetime, timezone as dt_timezone
+from pathlib import Path
 from typing import Any, Mapping, Sequence
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 from dateutil.parser import ParserError, UnknownTimezoneWarning, parse as parse_datetime
@@ -27,6 +29,15 @@ from .contracts import (
     ValidationIssue,
     ValidationSeverity,
 )
+
+
+def _iso_timestamp_seconds(ts: pd.Timestamp) -> str:
+    """Naive ISO 8601 with seconds (matches :func:`core.date_rules._format_iso_naive`)."""
+
+    dt = ts.to_pydatetime()
+    if dt.microsecond:
+        dt = dt.replace(microsecond=0)
+    return dt.isoformat(timespec="seconds")
 
 
 def validate_normalization_spec(spec: NormalizationSpec) -> list[ValidationIssue]:
@@ -72,15 +83,14 @@ def execute_normalization_spec(
     if any(i.severity == ValidationSeverity.ERROR for i in issues):
         return NormalizedBundle(issues=issues)
 
-    detected_by_role = {d.source_role: d for d in detected_files}
     events: list[NormalizedEvent] = []
     entities: list[ContentEntity] = []
     players: list[PlayerStatRecord] = []
 
     event_spec = _source_for_role(spec, SourceRole.EVENT_SOURCE)
-    event_file = detected_by_role.get(SourceRole.EVENT_SOURCE)
+    event_file = _detected_for_spec_source(event_spec, detected_files)
     entity_spec = _source_for_role(spec, SourceRole.ENTITY_SOURCE)
-    entity_file = detected_by_role.get(SourceRole.ENTITY_SOURCE)
+    entity_file = _detected_for_spec_source(entity_spec, detected_files)
     if event_spec is None and entity_spec is not None and entity_file is not None:
         entities, entity_issues = _normalize_entities(entity_spec, entity_file)
         issues.extend(entity_issues)
@@ -90,11 +100,21 @@ def execute_normalization_spec(
             issues=[_error("missing_event_source", "No event_source file was detected")]
         )
 
-    events, event_issues = _normalize_events(event_spec, event_file, spec, settings)
+    event_edt = event_spec.event_datetime or EventDatetimeSpec()
+    team_tz_map: dict[str, str] = {}
+    if not (event_edt.timezone and str(event_edt.timezone).strip()):
+        from core.event_timezone_infer import infer_team_timezones_from_names
+
+        homes = _unique_home_teams_for_timezone_infer(event_spec, event_file)
+        team_tz_map = infer_team_timezones_from_names(homes, settings)
+
+    events, event_issues = _normalize_events(
+        event_spec, event_file, spec, settings, team_tz=team_tz_map
+    )
     issues.extend(event_issues)
 
     metric_spec = _source_for_role(spec, SourceRole.METRIC_SOURCE)
-    metric_file = detected_by_role.get(SourceRole.METRIC_SOURCE)
+    metric_file = _detected_for_spec_source(metric_spec, detected_files)
     if metric_spec is not None and metric_file is not None:
         players, player_issues = _normalize_player_stats(metric_spec, metric_file)
         issues.extend(player_issues)
@@ -170,12 +190,31 @@ def _validate_entity_source(
         return
     if "entity_name" in fields:
         return
+    if "title" in fields:
+        return
     issues.append(
         _error(
             "invalid_entity_mapping",
-            f"Entity source {slot_id!r} needs company_name/ticker mappings or entity_name",
+            f"Entity source {slot_id!r} needs company_name/ticker mappings, entity_name, or title",
         )
-    )
+        )
+
+
+def _unique_home_teams_for_timezone_infer(
+    source: SourceNormalizationSpec,
+    detected: DetectedFile,
+) -> list[str]:
+    """Stable unique home team labels for AI timezone lookup (profile timezone unset)."""
+
+    homes: set[str] = set()
+    for row in detected.records:
+        try:
+            home, _ = _event_teams(row, source)
+        except ValueError:
+            continue
+        if home.strip():
+            homes.add(home.strip())
+    return sorted(homes)
 
 
 def _normalize_events(
@@ -183,16 +222,24 @@ def _normalize_events(
     detected: DetectedFile,
     spec: NormalizationSpec,
     settings: Mapping[str, Any],
+    *,
+    team_tz: Mapping[str, str] | None = None,
 ) -> tuple[list[NormalizedEvent], list[ValidationIssue]]:
     events: list[NormalizedEvent] = []
     issues: list[ValidationIssue] = []
     date_filter = settings.get("date_filter") or {}
 
+    team_tz = team_tz or {}
+    skipped_by_filter = 0
+    failed_parse = 0
+    total_rows = len(detected.records)
     for idx, row in enumerate(detected.records, start=detected.header_row_index + 2):
         try:
             home_team, away_team = _event_teams(row, source)
-            dt = _event_datetime(row, source, date_filter)
+            tz_override = team_tz.get(home_team.strip()) if team_tz else None
+            dt = _event_datetime(row, source, date_filter, timezone_override=tz_override)
             if not _within_date_range(dt, date_filter):
+                skipped_by_filter += 1
                 continue
             event_id = _event_id(row, source, idx)
             display = _cell(row, source.field_mappings.get("event_display"))
@@ -203,13 +250,14 @@ def _normalize_events(
                     event_id=event_id,
                     home_team=home_team,
                     away_team=away_team,
-                    event_datetime=dt.isoformat(),
+                    event_datetime=_iso_timestamp_seconds(dt),
                     subcategory=spec.package_key,
                     event_display=display or None,
                     metadata=_metadata(row, source),
                 )
             )
         except ValueError as exc:
+            failed_parse += 1
             issues.append(
                 ValidationIssue(
                     code="declarative_event_row_error",
@@ -222,7 +270,28 @@ def _normalize_events(
             )
 
     if not events:
-        issues.append(_error("no_events_normalized", "No event rows were normalized"))
+        df = date_filter if isinstance(date_filter, dict) else {}
+        window = ""
+        if df.get("start") or df.get("end"):
+            window = f" date_filter is {df.get('start')!r} to {df.get('end')!r}."
+        if total_rows == 0:
+            msg = "No data rows under the detected header for the schedule sheet."
+        elif failed_parse == total_rows:
+            msg = (
+                f"All {total_rows} schedule row(s) failed to parse (see row warnings). "
+                "Check Match/home/away mapping and Date + Time columns."
+            )
+        elif skipped_by_filter == total_rows:
+            msg = (
+                f"All {total_rows} schedule row(s) parsed but none fall within the date window.{window} "
+                "Widen date_filter in settings (or the upload auto date range) so it includes match days."
+            )
+        else:
+            msg = (
+                f"No event rows in range: {skipped_by_filter} row(s) outside date_filter,"
+                f" {failed_parse} parse error(s), {total_rows} total.{window}"
+            )
+        issues.append(_error("no_events_normalized", msg))
     return events, issues
 
 
@@ -272,11 +341,18 @@ def _normalize_entities(
         company = _cell(row, source.field_mappings.get("company_name"))
         ticker = _cell(row, source.field_mappings.get("ticker"))
         entity_name = _cell(row, source.field_mappings.get("entity_name"))
+        title = _cell(row, source.field_mappings.get("title"))
+        artist = _cell(row, source.field_mappings.get("artist"))
+        release_date = _cell(row, source.field_mappings.get("release_date"))
+        content_type = _cell(row, source.field_mappings.get("content_type"))
         topic_import_id = _cell(row, source.field_mappings.get("topic_import_id"))
-        entity_id = (ticker or entity_name or company).strip()
+        entity_id = (ticker or entity_name or title or company).strip()
         if not entity_id:
             continue
-        entity_id = entity_id.upper() if ticker else _slug(entity_id)
+        if title and artist:
+            entity_id = _slug("-".join(part for part in (title, artist, release_date) if part))
+        else:
+            entity_id = entity_id.upper() if ticker else _slug(entity_id)
         if entity_id in seen:
             issues.append(
                 ValidationIssue(
@@ -290,17 +366,34 @@ def _normalize_entities(
             )
             continue
         seen.add(entity_id)
-        display_name = f"{company} ({ticker.upper()})" if company and ticker else entity_name or company or entity_id
+        if title and artist:
+            display_name = f"{title} by {artist}"
+        elif title:
+            display_name = title
+        else:
+            display_name = f"{company} ({ticker.upper()})" if company and ticker else entity_name or company or entity_id
         metadata = _metadata(row, source)
+        for key, column in source.field_mappings.items():
+            value = _cell(row, column)
+            if value:
+                metadata.setdefault(key, value)
         if company:
             metadata.setdefault("company_name", company)
         if ticker:
             metadata.setdefault("ticker", ticker.upper())
+        for key, value in (
+            ("title", title),
+            ("artist", artist),
+            ("release_date", release_date),
+            ("content_type", content_type),
+        ):
+            if value:
+                metadata.setdefault(key, value)
         entities.append(
             ContentEntity(
                 entity_id=entity_id,
                 display_name=display_name,
-                entity_type="stock" if ticker else "entity",
+                entity_type="stock" if ticker else content_type or "content",
                 topic_import_id=topic_import_id or None,
                 metadata=metadata,
             )
@@ -341,25 +434,75 @@ def _split_matchup(value: str, spec: MatchupSplitSpec) -> tuple[str, str]:
     return parts[0].strip(), parts[1].strip()
 
 
+def _zoneinfo_from_profile_string(name: str) -> ZoneInfo:
+    """Resolve IANA name or a few legacy abbreviations used in YAML profiles."""
+
+    key = str(name or "").strip()
+    if not key:
+        raise ValueError("Empty timezone name")
+    try:
+        return ZoneInfo(key)
+    except Exception:
+        pass
+    aliases = {
+        "EST": "America/New_York",
+        "EDT": "America/New_York",
+        "CST": "America/Chicago",
+        "CDT": "America/Chicago",
+        "MST": "America/Denver",
+        "MDT": "America/Denver",
+        "PST": "America/Los_Angeles",
+        "PDT": "America/Los_Angeles",
+    }
+    mapped = aliases.get(key.upper())
+    if mapped:
+        return ZoneInfo(mapped)
+    raise ValueError(f"Unknown timezone: {name!r}")
+
+
+def _event_timestamp_to_naive_utc(ts: pd.Timestamp, tz_name: str | None) -> pd.Timestamp:
+    """Interpret naive *ts* as local in *tz_name*, then return naive UTC (pandas)."""
+
+    if tz_name is None or not str(tz_name).strip():
+        return ts
+    zi = _zoneinfo_from_profile_string(str(tz_name))
+    if ts.tzinfo is not None:
+        return ts.tz_convert(dt_timezone.utc).tz_localize(None)
+    aware = ts.tz_localize(zi)
+    utc = aware.tz_convert(dt_timezone.utc)
+    return utc.tz_localize(None)
+
+
 def _event_datetime(
     row: Mapping[str, Any],
     source: SourceNormalizationSpec,
     date_filter: Mapping[str, Any],
+    *,
+    timezone_override: str | None = None,
 ) -> pd.Timestamp:
     spec = source.event_datetime or EventDatetimeSpec()
+    tz_profile = str(spec.timezone).strip() if spec.timezone else ""
+    tz_ov = str(timezone_override or "").strip()
+    effective_tz = tz_profile or tz_ov or None
     if spec.datetime_column:
-        return _parse_datetime(_cell(row, spec.datetime_column), date_filter)
+        ts = _parse_datetime(_cell(row, spec.datetime_column), date_filter)
+        return _event_timestamp_to_naive_utc(ts, effective_tz)
     if "event_datetime" in source.field_mappings:
-        return _parse_datetime(_cell(row, source.field_mappings["event_datetime"]), date_filter)
+        ts = _parse_datetime(_cell(row, source.field_mappings["event_datetime"]), date_filter)
+        return _event_timestamp_to_naive_utc(ts, effective_tz)
 
     date_col = spec.date_column or source.field_mappings.get("event_date")
     time_col = spec.time_column or source.field_mappings.get("event_time")
     date_val = _cell(row, date_col)
-    time_val = _cell(row, time_col) if time_col else ""
+    time_raw = _cell(row, time_col) if time_col else ""
+    time_val = str(time_raw).strip() if time_raw not in (None, "") else ""
+    if not time_val:
+        time_val = "00:00:00"
     raw = f"{date_val} {time_val}".strip()
     if not raw:
         raise ValueError("Missing event datetime")
-    return _parse_datetime(raw, date_filter)
+    ts = _parse_datetime(raw, date_filter)
+    return _event_timestamp_to_naive_utc(ts, effective_tz)
 
 
 def _parse_datetime(raw: str, date_filter: Mapping[str, Any]) -> pd.Timestamp:
@@ -423,6 +566,46 @@ def _source_for_role(
     spec: NormalizationSpec, role: SourceRole
 ) -> SourceNormalizationSpec | None:
     return next((s for s in spec.sources.values() if s.source_role == role), None)
+
+
+def _detected_for_spec_source(
+    source: SourceNormalizationSpec | None,
+    detected_files: Sequence[DetectedFile],
+) -> DetectedFile | None:
+    """Resolve the workbook row for this spec source.
+
+    Prefer ``(source_role, basename(file_pattern))`` so schedule+stats packages stay
+    strict. If that misses (e.g. UI slot id ``event_source`` forced ``EVENT_SOURCE`` on
+    a file while the saved declarative spec uses ``entity_source`` for the same
+    workbook), fall back to basename-only match so entity-only profiles still run.
+    """
+
+    if source is None or not str(source.file_pattern or "").strip():
+        return None
+    pattern = Path(str(source.file_pattern).strip()).name
+    role_matches = [
+        d
+        for d in detected_files
+        if d.source_role == source.source_role and d.file_path.name == pattern
+    ]
+    if len(role_matches) == 1:
+        return role_matches[0]
+    name_matches = [d for d in detected_files if d.file_path.name == pattern]
+    if source.sheet_name:
+        sheet_hits = [d for d in name_matches if d.sheet_name == source.sheet_name]
+        if len(sheet_hits) == 1:
+            return sheet_hits[0]
+        role_sheet = [d for d in role_matches if d.sheet_name == source.sheet_name]
+        if len(role_sheet) == 1:
+            return role_sheet[0]
+    if len(name_matches) == 1:
+        return name_matches[0]
+    if len(role_matches) > 1:
+        return role_matches[0]
+    same_role = [d for d in detected_files if d.source_role == source.source_role]
+    if len(same_role) == 1:
+        return same_role[0]
+    return None
 
 
 def _cell(row: Mapping[str, Any], column: str | None) -> str:

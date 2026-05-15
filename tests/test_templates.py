@@ -43,6 +43,8 @@ def test_load_all_shipped_templates() -> None:
         "stocks_daily_close_higher",
         "stocks_daily_biggest_gainer",
         "stocks_quarterly_biggest_loser",
+        "music-yn-01",
+        "music-mc-01",
     } <= ids
     assert templates["mlb_game_winner"].question_family == "event"
     assert templates["mlb_game_winner"].answer_type == "multiple_choice"
@@ -54,6 +56,8 @@ def test_load_all_shipped_templates() -> None:
     assert templates["stocks_daily_close_higher"].question_family == "stock"
     assert templates["stocks_daily_close_higher"].answer_options == ""
     assert templates["stocks_daily_close_higher"].timeframe == "Daily"
+    assert templates["music-yn-01"].question_family == "content"
+    assert templates["music-yn-01"].answer_options == ""
 
 
 def test_parse_template_roundtrip_minimal_event() -> None:

@@ -13,6 +13,7 @@ from typing import Any
 _DEFAULT_START_HOURS = -24
 _DEFAULT_EXPIRATION_HOURS = 0
 _DEFAULT_RESOLUTION_HOURS = 4
+_DEFAULT_RESOLUTION_OFFSET_ANCHOR = "kickoff"
 
 
 @dataclass(frozen=True)
@@ -37,8 +38,14 @@ def parse_event_datetime(value: str | datetime) -> datetime:
     return dt
 
 
-def get_date_rules_for_category(settings: dict[str, Any], category_key: str) -> dict[str, int]:
-    """Merge date_rules.default with date_rules[category_key] (category wins)."""
+def get_date_rules_for_category(settings: dict[str, Any], category_key: str) -> dict[str, Any]:
+    """Merge date_rules.default with date_rules[category_key] (category wins).
+
+    ``resolution_offset_anchor``:
+    - ``kickoff`` (default): ``resolution = event_datetime + resolution_offset_hours``
+    - ``expiration``: ``resolution = expiration_datetime + resolution_offset_hours``
+      (expiration is still ``event_datetime + expiration_offset_hours``).
+    """
     rules_root = settings.get("date_rules")
     if not isinstance(rules_root, dict):
         rules_root = {}
@@ -49,6 +56,13 @@ def get_date_rules_for_category(settings: dict[str, Any], category_key: str) -> 
     cat = rules_root.get(category_key)
     if isinstance(cat, dict):
         merged.update(cat)
+    raw_anchor = str(
+        merged.get("resolution_offset_anchor") or _DEFAULT_RESOLUTION_OFFSET_ANCHOR
+    ).strip().lower()
+    if raw_anchor in ("expiration", "expiry", "after_expiration"):
+        anchor = "expiration"
+    else:
+        anchor = "kickoff"
     return {
         "start_offset_hours": int(merged.get("start_offset_hours", _DEFAULT_START_HOURS)),
         "expiration_offset_hours": int(
@@ -57,6 +71,7 @@ def get_date_rules_for_category(settings: dict[str, Any], category_key: str) -> 
         "resolution_offset_hours": int(
             merged.get("resolution_offset_hours", _DEFAULT_RESOLUTION_HOURS)
         ),
+        "resolution_offset_anchor": anchor,
     }
 
 
@@ -76,7 +91,10 @@ def compute_question_dates(
     base = parse_event_datetime(event_datetime)
     start = base + timedelta(hours=r["start_offset_hours"])
     expiration = base + timedelta(hours=r["expiration_offset_hours"])
-    resolution = base + timedelta(hours=r["resolution_offset_hours"])
+    if r.get("resolution_offset_anchor") == "expiration":
+        resolution = expiration + timedelta(hours=r["resolution_offset_hours"])
+    else:
+        resolution = base + timedelta(hours=r["resolution_offset_hours"])
     return QuestionDates(
         start_date=_format_iso_naive(start),
         expiration_date=_format_iso_naive(expiration),

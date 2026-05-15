@@ -8,7 +8,7 @@ all question types, answer formats, and priority rules come from templates and c
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, List
 
 from pydantic import BaseModel
 
@@ -46,7 +46,7 @@ class PromptItem:
 
     template: QuestionTemplate
     event: NormalizedEvent
-    players: list[PlayerStatRecord] = field(default_factory=list)
+    players: List[PlayerStatRecord] = field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -70,7 +70,7 @@ class GeneratedQuestionBatch(BaseModel):
     executor (Task 5.2).
     """
 
-    questions: list[GeneratedQuestion]
+    questions: List[GeneratedQuestion]
 
 
 # ---------------------------------------------------------------------------

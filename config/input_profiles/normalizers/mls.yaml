@@ -1,5 +1,5 @@
 version: 1
-package_key: MLS
+package_key: mls
 sources:
   event_source:
     source_role: event_source
@@ -8,7 +8,6 @@ sources:
     header_row_index: 0
     field_mappings:
       event_date: Date
-      event_display: Match
       event_time: Time
     metric_mappings: {}
     metadata_mappings: {}
@@ -27,36 +26,36 @@ sources:
       - Date
       - Match
       - Time
-      strategy: concatenate
+      strategy: concat
   metric_source_2025:
     source_role: metric_source
-    file_pattern: file.xlsx
+    file_pattern: stats.xlsx
     sheet_name: 2025 Statistics
     header_row_index: 0
     field_mappings:
       player_name: Name
       team: Team
     metric_mappings:
+      APPEARANCES: P
       GOALS: G
-      MATCHES_PLAYED: P
     metadata_mappings:
-      RANK: RK
+      rank: RK
     matchup_split: null
     event_datetime: null
     event_id: null
   metric_source_2026:
     source_role: metric_source
-    file_pattern: file.xlsx
+    file_pattern: stats.xlsx
     sheet_name: 2026 Stastics
     header_row_index: 0
     field_mappings:
       player_name: Name
       team: Team
     metric_mappings:
+      APPEARANCES: P
       GOALS: G
-      MATCHES_PLAYED: P
     metadata_mappings:
-      RANK: RK
+      rank: RK
     matchup_split: null
     event_datetime: null
     event_id: null
@@ -71,7 +70,7 @@ shape_signature:
       header_row_index: 0
       sheet_name: 2026 Schedule
   metric_source:
-    filename: file.xlsx
+    filename: stats.xlsx
     sheets:
     - columns:
       - RK
@@ -89,6 +88,6 @@ shape_signature:
       - G
       header_row_index: 0
       sheet_name: 2026 Stastics
-notes: Event source uses Match split into home_team and away_team via 'vs.'. No timezone
-  or year is explicitly present in the date values, so none was invented. Separate
-  metric sources are proposed per sheet/year.
+notes: Mapped MLS schedule as event source using matchup split on Match. Mapped player
+  statistics sheets separately by season; preserved RK as metadata and mapped P/G
+  to APPEARANCES/GOALS.

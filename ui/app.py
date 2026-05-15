@@ -15,6 +15,7 @@ from werkzeug.utils import secure_filename
 
 from core.config import load_settings, load_settings_disk_only, save_settings_yaml
 from core.csv_export import DEFAULT_OUTPUT_DIR
+from core.input_date_range import infer_date_range_from_excel_paths
 from core.input_slots import (
     get_files_map_for_category,
     get_inputs_category_key,
@@ -28,10 +29,16 @@ from core.parsers.contracts import NormalizationSpec, ValidationIssue, Validatio
 from core.parsers.declarative import preview_normalization_spec, validate_normalization_spec
 from core.parsers.detector import inspect_file
 from core.parsers.profiles import save_normalization_spec
-from core.parsers.service import resolve_input_scan_jobs
+from core.parsers.service import load_normalized_bundle, resolve_input_scan_jobs
 from core.pipeline import PipelineResult, pipeline_result_to_job_dict, run_pipeline
-from core.template_config.loader import load_template_dir, resolve_templates_directory
+from core.template_config.loader import (
+    index_template_json_paths_by_id,
+    load_template_dir,
+    resolve_templates_directory,
+)
 from core.template_config.schema import parse_template_dict
+from core.resolution_date_spec import maybe_compile_resolution_for_template_data
+from core.template_placeholder_mapper import normalize_template_for_upload
 from core.template_ui import (
     filter_templates_for_package,
     infer_subcategory_for_package,
@@ -53,6 +60,10 @@ def _is_safe_download_name(name: str) -> bool:
     if ".." in name or "/" in name or "\\" in name:
         return False
     return bool(secure_filename(name) == name)
+
+
+def _form_truthy(value: Any) -> bool:
+    return str(value or "").strip().lower() in ("1", "true", "yes", "on")
 
 
 @dataclass
@@ -367,9 +378,18 @@ def create_app() -> Flask:
         if not files:
             return jsonify({"error": "No template file uploaded."}), 400
 
-        saved: list[dict[str, str]] = []
+        replace_existing = _form_truthy(request.form.get("replace_existing"))
+
         errors: list[dict[str, str]] = []
-        upload_ids: set[str] = set()
+        warnings: list[dict[str, str]] = []
+        staged: list[dict[str, Any]] = []
+        staged_ids: set[str] = set()
+        category_key = get_inputs_category_key(settings)
+        content_entities = None
+        try:
+            content_entities = load_normalized_bundle(settings, category_key=category_key).entities
+        except (FileNotFoundError, ValueError):
+            content_entities = None
 
         for fh in files:
             name = fh.filename or ""
@@ -383,11 +403,27 @@ def create_app() -> Flask:
             for block_index, data in enumerate(blocks, start=1):
                 label = name if len(blocks) == 1 else f"{name} [block {block_index}]"
                 try:
+                    normalized = normalize_template_for_upload(
+                        data,
+                        settings,
+                        category_key=category_key,
+                        entities=content_entities,
+                    )
+                    data = normalized.data
+                    warnings.extend(
+                        {"filename": label, "warning": warning}
+                        for warning in normalized.warnings
+                    )
+                    try:
+                        data = maybe_compile_resolution_for_template_data(data, settings)
+                    except (ValueError, RuntimeError) as exc:
+                        errors.append({"filename": label, "error": str(exc)})
+                        continue
                     parsed = parse_template_dict(data)
                 except ValueError as exc:
                     errors.append({"filename": label, "error": str(exc)})
                     continue
-                if parsed.id in upload_ids:
+                if parsed.id in staged_ids:
                     errors.append(
                         {
                             "filename": label,
@@ -395,14 +431,71 @@ def create_app() -> Flask:
                         }
                     )
                     continue
-                upload_ids.add(parsed.id)
-                safe_id = re.sub(r"[^a-zA-Z0-9_-]+", "_", parsed.id).strip("_") or "template"
-                out_name = f"{safe_id}.json"
-                out_path = tpl_dir / out_name
-                with out_path.open("w", encoding="utf-8") as out_f:
-                    json.dump(data, out_f, indent=2, ensure_ascii=False)
-                    out_f.write("\n")
-                saved.append({"id": parsed.id, "filename": out_name})
+                staged_ids.add(parsed.id)
+                staged.append({"parsed": parsed, "label": label})
+
+        disk_index = index_template_json_paths_by_id(tpl_dir)
+        conflicts: list[dict[str, Any]] = []
+        for item in staged:
+            parsed = item["parsed"]
+            safe_id = re.sub(r"[^a-zA-Z0-9_-]+", "_", parsed.id).strip("_") or "template"
+            target = tpl_dir / f"{safe_id}.json"
+            existing = disk_index.get(parsed.id, [])
+            others = [p for p in existing if p.resolve() != target.resolve()]
+            if others:
+                conflicts.append(
+                    {
+                        "template_id": parsed.id,
+                        "save_as": target.name,
+                        "existing_files": [p.name for p in others],
+                    }
+                )
+
+        if conflicts and not replace_existing:
+            return (
+                jsonify(
+                    {
+                        "ok": False,
+                        "conflict": True,
+                        "conflicts": conflicts,
+                        "message": (
+                            "These template ids already exist in other .json files. "
+                            "Choose Cancel, or upload again with replace enabled to save "
+                            f"as the canonical {conflicts[0].get('save_as', '*.json')} name(s) and remove the listed files."
+                        ),
+                    }
+                ),
+                409,
+            )
+
+        saved: list[dict[str, str]] = []
+        unlink_resolved: set[Path] = set()
+        for item in staged:
+            parsed = item["parsed"]
+            safe_id = re.sub(r"[^a-zA-Z0-9_-]+", "_", parsed.id).strip("_") or "template"
+            out_path = tpl_dir / f"{safe_id}.json"
+            existing = disk_index.get(parsed.id, [])
+            others = [p for p in existing if p.resolve() != out_path.resolve()]
+            if replace_existing and others:
+                for p in others:
+                    unlink_resolved.add(p.resolve())
+            with out_path.open("w", encoding="utf-8") as out_f:
+                json.dump(parsed.to_dict(), out_f, indent=2, ensure_ascii=False)
+                out_f.write("\n")
+            saved.append({"id": parsed.id, "filename": out_path.name})
+
+        for resolved in unlink_resolved:
+            path = Path(resolved)
+            if path.is_file() and path.suffix.lower() == ".json":
+                try:
+                    path.unlink()
+                except OSError:
+                    warnings.append(
+                        {
+                            "filename": path.name,
+                            "warning": f"Could not remove duplicate template file {path.name}",
+                        }
+                    )
 
         disk = load_settings_disk_only()
         te = dict(disk.get("templates_enabled") or {})
@@ -415,6 +508,8 @@ def create_app() -> Flask:
                 "ok": len(saved) > 0,
                 "saved": saved,
                 "errors": errors,
+                "warnings": warnings,
+                "replaced_duplicates": bool(replace_existing and unlink_resolved),
             }
         )
 
@@ -446,6 +541,18 @@ def create_app() -> Flask:
             fh.save(str(dest))
             saved.append({"slot_id": slot_id, "filename": target_name})
 
+        date_filter_auto: dict[str, Any] = {"applied": False}
+        if saved:
+            saved_paths = [input_dir / item["filename"] for item in saved]
+            start_iso, end_iso = infer_date_range_from_excel_paths(saved_paths)
+            if start_iso and end_iso:
+                save_settings_yaml({"date_filter": {"start": start_iso, "end": end_iso}})
+                date_filter_auto = {
+                    "applied": True,
+                    "start": start_iso,
+                    "end": end_iso,
+                }
+
         if not any_file:
             return jsonify(
                 {
@@ -454,7 +561,14 @@ def create_app() -> Flask:
                 }
             ), 400
 
-        return jsonify({"ok": True, "category_key": cat, "saved": saved})
+        return jsonify(
+            {
+                "ok": True,
+                "category_key": cat,
+                "saved": saved,
+                "date_filter_auto": date_filter_auto,
+            }
+        )
 
     @app.post("/run")
     def run() -> Any:

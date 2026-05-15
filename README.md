@@ -41,6 +41,8 @@ Matching rule: labels are compared in a **normalized** form (case-insensitive; s
 
 - **`date_filter.start` / `date_filter.end`**: Only events (and thus questions) in that window are considered.
 - **`date_rules`**: Offsets for start / expiration / resolution on each row. Keys under `date_rules` can follow **`date_rules.default`** plus overrides; row assembly uses the template’s subcategory (lower case) when resolving rules—add a block if you need custom offsets for a new vertical.
+  - **`resolution_offset_anchor`**: `kickoff` (default) keeps `resolution_date = event_datetime + resolution_offset_hours`. Use `expiration` to compute `resolution_date = expiration_datetime + resolution_offset_hours` (after applying `expiration_offset_hours`), which matches “resolve X hours after the question expires” when those times differ from kickoff.
+- **Event times & timezones (declarative schedules)**: If the normalizer maps separate date + time columns, a missing time defaults to **00:00:00**. When `event_datetime.timezone` is set in the saved profile (IANA like `America/New_York`, or legacy `EST`), that wall time is interpreted in that zone and stored as **naive UTC** on `NormalizedEvent.event_datetime`. If `timezone` is unset but `openai_api_key` is configured, the app batches **home team → IANA** lookups via OpenAI and merges them into [`config/event_team_timezone_cache.json`](config/event_team_timezone_cache.json) for repeat runs.
 
 ### 6. Enable templates
 
@@ -53,6 +55,45 @@ For a package without a built-in Python normalizer, use the UI flow: upload inpu
 ### Sample template CSVs
 
 See [`samples/`](samples/) (e.g. [`samples/template_upload_two_world_cup_templates.csv`](samples/template_upload_two_world_cup_templates.csv)) for the repeating header row format used by **Upload** in the UI.
+
+### Resolution date rules (`resolution_date_rule`)
+
+Per-template **resolution** timing can be driven by a natural-language column (compiled once at upload) instead of only YAML heuristics or `date_rules` defaults.
+
+| Mechanism | Applies to |
+|-----------|------------|
+| **`resolution_date_rule`** (string) | Optional on **content** table CSVs, **block** CSV templates, and **JSON** templates for `question_family` **`content`**, **`event`**, or **`entity_stat`**. |
+| **`resolution_date_spec`** (object) | Written automatically when you upload with a non-empty `resolution_date_rule` and `openai_api_key` is available. You may also author this JSON by hand to skip compilation. |
+| **Stocks** | **`stock`** templates ignore these fields; they are removed when saving stock uploads. |
+
+**Upload behavior**
+
+1. For non-stock templates, if `resolution_date_rule` is non-empty, the UI calls OpenAI to normalize it into `resolution_date_spec` before saving `templates/<id>.json`. If compilation or validation fails, the upload errors for that row.
+2. If `resolution_date_rule` is empty and `resolution_date_spec` is absent, behavior is unchanged: **content** uses legacy text heuristics + optional `content.resolution_dates` in settings; **event / entity_stat** keep YAML `date_rules` resolution offsets (start and expiration always still come from `date_rules`).
+3. For **sports events**, a spec only **replaces the `resolution_date` column**; start and expiration still come from `date_rules` for the template subcategory.
+
+**What to write in `resolution_date_rule`**
+
+Use plain English. Examples aligned with entertainment uploads:
+
+- `Resolution date should be start_date + 7 days.` (map `start_date` to **release** or **question start** in the compiled spec)
+- `Resolution date should be start_date + 180 days.`
+- `Resolution date should align with Grammy nomination announcement date. Resolution date should start on November 1 of the calendar year.`
+- `Resolution should evaluate days 8-14 after start_date.` (typically compiled as a **window end** anchor)
+
+Sports/event examples can follow the same column; phrase anchors in terms of **kickoff / first pitch / event time** so the model maps them to `event_datetime`. Concrete sport sample rows can be added later.
+
+**Compiled spec (for authors debugging JSON)**
+
+The machine schema lives in [`core/resolution_date_spec.py`](core/resolution_date_spec.py). At a high level, `kind` is one of:
+
+- **`offset_from_anchor`**: `anchor` (`release_date`, `question_start`, `question_expiration`, `metadata_field`, or for events `event_datetime`) plus `offset_days` / `offset_hours`.
+- **`calendar_in_year`**: `calendar_month`, `calendar_day`, and `year_policy` (`release_year`, `release_year_plus_1`, `event_year`, `event_year_plus_1`, `static_context_year`).
+- **`metadata_date`**: read an ISO/calendar date from entity or event `metadata` via `metadata_key`.
+- **`window_end`**: `anchor` + `end_offset_days` (resolution at end of a day-based window).
+- **`none`**: keep default resolution behavior for that pipeline.
+
+`metadata_field` requires `metadata_key` (snake_case, e.g. `estimated_nomination_date`, `second_weekend_start_date`).
 
 ---
 
